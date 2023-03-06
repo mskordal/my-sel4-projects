@@ -19,3 +19,4 @@ projects/sel4runtime/
 *.elf
 vivado*
 *.tcl
+.Xil/
