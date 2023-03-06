@@ -1,0 +1,21 @@
+# root directory SeL4 default files/directories
+init-build.sh
+/easy-settings.cmake
+.sel4_cache/
+kernel/
+build/
+tools/
+
+# tags file
+tags
+
+# project libraries
+projects/musllibc/
+projects/seL4_libs/
+projects/util_libs/
+projects/sel4runtime/
+
+#mspoc files
+*.elf
+vivado*
+*.tcl
