@@ -4,6 +4,8 @@ Ultrascale+ MPSoC to an SeL4 user application. More specifically we use the
 ZCU102 Xilinx board as our setup environment.
 
 # Prerequisites
+Make sure you have read the [Hello World](https://github.com/mskordal/my-sel4-projects/tree/main/projects/hello) project of the same repository on instructions how to create the project structure, build and run the project.
+
 For this tutorial we have used several tools and guides and have also installed
 the dependecies of those tools:
 - To setup a simple SeL4 standalone project, and use it as the foundation of
