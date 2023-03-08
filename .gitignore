@@ -3,7 +3,7 @@ init-build.sh
 /easy-settings.cmake
 .sel4_cache/
 kernel/
-build/
+sel4build/
 tools/
 
 # tags file
@@ -20,3 +20,8 @@ projects/sel4runtime/
 vivado*
 *.tcl
 .Xil/
+
+# clang/llvm auto-generated files
+llvmpassbuild/
+*.ll
+*.so
