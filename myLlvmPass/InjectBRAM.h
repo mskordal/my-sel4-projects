@@ -5,10 +5,10 @@
 
 namespace llvm
 {
-	class InjectBRAM : public PassInfoMixin<InjectBRAM>
+	class InjectBRAMMod : public PassInfoMixin<InjectBRAMMod>
 	{
 		public:
-			PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+			PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 	};
 } // namespace llvm
 

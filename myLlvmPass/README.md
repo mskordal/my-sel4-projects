@@ -43,12 +43,17 @@ make
 # Compile the dummy programm into IR format.
 $LLVM_DIR/bin/clang -O1 -S -emit-llvm ../myLlvmPass/app.c -o app.ll
 
-# Load the pass into the IR. Since this is not yet a transformation pass, it
-# will not produce a binary output. It will simply print all the internal
-# functions of the file.
+# Use the plugin at the IR file. First case is for instrumentations passes
+$LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram app.ll -S -o derived.ll
+
+# Second case is for analyses Passes
 $LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram -disable-output app.ll
+
 ```
 
-# Current Pass State
-The Pass currently just prints the non-external functions that are being called
+# Prev Pass State 1
+The Pass just prints the non-external functions that are being called
 in the programme.
+
+# Current Pass State
+Switched Function pass to a module pass. The pass create a global pointer variable and assigns the address `0xa0010000` to it
