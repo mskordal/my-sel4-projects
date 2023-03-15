@@ -4,24 +4,22 @@
 /* constants */
 #define MSG_DATA 0x6161 //  arbitrary data to send
 
-void func1(void);
-void func2(void);
-void func3(void);
+int func1(int x);
+int func2(int x);
+int func3(int x);
 
 int main(int argc, char **argv)
 {
+	unsigned long* ptr = (unsigned long *)0x7000000;
 	int x = 0;
 
 	printf("process_2: hey hey hey\n");
 
-	func1();
-	x = x + 1;
+	x += func1(3);
 
-	func2();
-	x = x + 2;
+	x += func2(5);
 
-	func3();
-	x = x + 3;
+	x += func3(6);
 
 	printf("x: %d\n", x);
 	/*while(1);*/
@@ -29,18 +27,21 @@ int main(int argc, char **argv)
 	return 0;
 }
 
-void func1(void)
+int func1(int x)
 {
-	printf("This is func1\n");
+	int y = x + x;
+	return y;
 }
 
-void func2(void)
+int func2(int x)
 {
-	printf("This is func2\n");
+	int y = x + x + x;
+	return y;
 }
 
-void func3(void)
+int func3(int x)
 {
-	printf("This is func3\n");
+	int y = x * x;
+	return y;
 }
 
