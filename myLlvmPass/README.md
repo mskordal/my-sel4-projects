@@ -49,11 +49,22 @@ $LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram app.l
 # Second case is for analyses Passes
 $LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram -disable-output app.ll
 
+# To directly inject the pass through clang without using opt, run the command
+# below. Also for some reason this works even with -O0
+$LLVM_DIR/bin/clang -O0 -fpass-plugin=./libInjectBRAM.so -g ../myLlvmPass/app.c -o app
+
 ```
 
 # Prev Pass State 1
 The Pass just prints the non-external functions that are being called
 in the programme.
 
+# Prev Pass State 1
+Switched Function pass to a module pass. The pass create a global pointer
+variable and assigns the address `0xa0010000` to it # Current Pass State.
+
 # Current Pass State
-Switched Function pass to a module pass. The pass create a global pointer variable and assigns the address `0xa0010000` to it
+In main function, the address of the global is loaded to a local pointer, and
+the then the constant value '1' is written to the address pointed by the local
+pointer. This will cause a segmentation when run locally, since there is
+nothing at that address.

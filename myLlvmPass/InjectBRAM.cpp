@@ -4,6 +4,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/BasicBlock.h"
+#include <iostream> //TODO: for debugging. Remove later
 
 // store i64 117440512, i64* %6, align 8
 
@@ -32,6 +33,24 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 
 	// Set the initial value of the global variable. Overwrites if existing
 	GV->setInitializer(PtrVal);
+	
+	// get function main of this module
+	Function* mainF = M.getFunction("main");
+
+	//get the first basic block of main
+	BasicBlock* main1stBB = &mainF->getEntryBlock();
+
+	// init a IRbuilder pointing in the beginning of the 1st block
+	IRBuilder<> builder(main1stBB, main1stBB->begin());
+
+	//Create a load inst of the value of the global variable into a local
+	Value* loadedPtr = builder.CreateLoad(GV->getValueType(), GV);
+
+	// create a constant integer of value 1
+	Value* constOne = llvm::ConstantInt::get(context, llvm::APInt(64, 1));
+
+	//create a store instruction that stores 1 to the address of pointer
+	builder.CreateStore(constOne, loadedPtr);
 
 	return llvm::PreservedAnalyses::all();
 }
@@ -40,24 +59,26 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 //-----------------------------------------------------------------------------
 // New PM Registration
 //-----------------------------------------------------------------------------
-llvm::PassPluginLibraryInfo getInjectBRAMPluginInfo()
+llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
 {
+	//std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
 	return
 	{
-		LLVM_PLUGIN_API_VERSION, "InjectBRAM", LLVM_VERSION_STRING,
+		LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
 		[](PassBuilder &PB)
 		{
-			PB.registerPipelineParsingCallback
+			//PB.registerPipelineParsingCallback
+			PB.registerOptimizerEarlyEPCallback
 			(
-				[](StringRef Name, ModulePassManager &MPM,
-				ArrayRef<PassBuilder::PipelineElement>)
+				[](ModulePassManager &MPM, OptimizationLevel)
+				//[](StringRef Name, ModulePassManager &MPM,
+				//ArrayRef<PassBuilder::PipelineElement>)
 				{
-					if (Name == "inject-bram")
-					{
-						MPM.addPass(InjectBRAMMod());
-						return true;
-					}
-					return false;
+					//if (Name == "inject-bram")
+					//{
+					MPM.addPass(InjectBRAMMod());
+					return true;
+					//}
 				}
 			);
 		}
@@ -73,6 +94,6 @@ llvm::PassPluginLibraryInfo getInjectBRAMPluginInfo()
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo()
 {
-	return getInjectBRAMPluginInfo();
+	return getInjectBRAMModPluginInfo();
 }
 
