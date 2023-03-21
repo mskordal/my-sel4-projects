@@ -11,6 +11,12 @@ and
 [Mapping](https://github.com/mskordal/my-sel4-projects/tree/main/projects/mapping)
 projects of the same repository.
 
+In addition to the repositories that need to be downloaded in the `projects`
+directory, this project requires the following cloning as well:
+```bash
+git clone https://github.com/seL4/sel4runtime.git projects/sel4runtime
+```
+
 For this tutorial we have used several tools and guides and have also installed
 the dependecies of those tools:
 - To setup a simple SeL4 standalone project, and use it as the foundation of
