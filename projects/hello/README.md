@@ -166,3 +166,7 @@ ninja
 ```
 You should see the "Hello World!" message followed by a printf warning and
 a capability fault. You can exit QEMU with `Ctrl-a + x`.
+
+Additional useful flags for `init-build.sh`:
+- `-DTRIPLE=aarch64-linux-gnu`: DTRIPLE allows to use clang instead of gcc.
+  aarch64-linux-gnu specifies that we want to compile for ARM 64bit

@@ -65,7 +65,7 @@ mapping process in SeL4.
 To allocate a frame starting from 0xA0010000 in the larger region above, we
 first need to retype the *(0x80000000,0xA0000000)* subpart of our larger
 region, then retype *(0xA0000000,0xA0010000)*, then finally map the frame at
-*(0xA0000000,0xA0012000)* The first two parts will still be retyped as Untyped
+*(0xA0010000,0xA0012000)* The first two parts will still be retyped as Untyped
 since they do not correspond to any actual device and cannot be used in any
 way. The third part will be typed as an actual memory frame.
 

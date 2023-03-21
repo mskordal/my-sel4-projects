@@ -32,7 +32,9 @@ the dependecies of those tools:
   <https://www.xilinx.com/support/download.html>
 
 # Guides
-To understand how to use the VKA and allocman libraries to automatically instantiate VSpaces, CSpaces, threads, process and map pages, Complete the following three tutorials
+To understand how to use the VKA and allocman libraries to automatically
+instantiate VSpaces, CSpaces, threads, process and map pages, Complete the
+following three tutorials
 
 - Dynamic Libraries 1: <https://docs.sel4.systems/Tutorials/dynamic-1.html>
 
@@ -67,9 +69,9 @@ specifically:
 1. We call `vka_alloc_object_at_maybe_dev` instead of `vka_alloc_frame` which
    is called 2 levels deeper than the latter. This function allocates a
    capability to the frame that we will later map in the bram. It allows to
-   specify the exact physical we want to map from plus specify that what we
-   want to map is a device. We no longer need to map intermediate objects. We
-   can immidiately specify the exact base address of the BRAM.
+   specify the exact physical address we want to map, and if we want to map  a
+   device. We no longer need to map intermediate objects. We can immidiately
+   specify the exact base address of the BRAM.
 
 2. Next, we allocate the object of the last level PTE of our frame using
    `vka_alloc_page_table`.
