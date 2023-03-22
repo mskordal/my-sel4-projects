@@ -23,7 +23,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 
 	// Create a constant 64-bit integer value.
 	// APInt is an object that represents an integer of specified bitwidth
-    ConstantInt *Int64Val = ConstantInt::get(context, APInt(64, 0xa0010000));
+    ConstantInt *Int64Val = ConstantInt::get(context, APInt(64, 0x7000000));
 
     // Convert the integer value to a pointer. Basically a typecast
     Constant *PtrVal = ConstantExpr::getIntToPtr(Int64Val, Int64PtrTy);
@@ -47,7 +47,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 	Value* loadedPtr = builder.CreateLoad(GV->getValueType(), GV);
 
 	// create a constant integer of value 1
-	Value* constOne = llvm::ConstantInt::get(context, llvm::APInt(64, 1));
+	Value* constOne = llvm::ConstantInt::get(context, llvm::APInt(64, 17));
 
 	//create a store instruction that stores 1 to the address of pointer
 	builder.CreateStore(constOne, loadedPtr);
