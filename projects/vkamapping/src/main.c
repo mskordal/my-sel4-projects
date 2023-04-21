@@ -130,20 +130,6 @@ int main(void)
 
 	ZF_LOGF_IFERR(error, "Failed to alloc a frame in BRAM.\n");
 
-	/*with vka we only need to allocate the page table entry of the last level*/
-	vka_object_t pt_object;
-	error =  vka_alloc_page_table(&vka, &pt_object);
-	ZF_LOGF_IFERR(error, "Failed to allocate new page table.\n");
-
-	/*void* bram;*/
-	/*reservation_t bram_reservation;*/
-	/*bram_reservation = vspace_reserve_range(&vspace,*/
-	/*BIT(BRAM_SIZE_BITS), seL4_ReadWrite, 1, &bram);*/
-	/*ZF_LOGF_IF(virtual_reservation.res == NULL, "Failed to reserve BRAM v. memory.\n");*/
-	/*printf("BRAM vaddr: %p\n", bram);*/
-	/*fflush(stdout);*/
-
-
 	// This array needs to be passed to sel4utils_map_page cause this function
 	// will populate it with reference to all additional objects that were
 	// created in order to map the page. num_objects will be updated with the
