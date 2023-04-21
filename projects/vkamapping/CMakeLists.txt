@@ -27,6 +27,9 @@ sel4_libs_import_libraries()
 
 add_executable(app src/app.c)
 
+# Include the pass in the app elf file
+#target_compile_options(app PRIVATE -fpass-plugin=/home/mskordal/workspace/myRepos/my-sel4-projects/llvmpassbuild/libInjectBRAM.so)
+
 target_link_libraries(app
 	sel4 muslc sel4muslcsys
 	sel4utils)

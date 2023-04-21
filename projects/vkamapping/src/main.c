@@ -144,18 +144,19 @@ int main(void)
 	/*fflush(stdout);*/
 
 
-	/*here we map the PTE to our vspace*/
-	error = seL4_ARCH_PageTable_Map(pt_object.cptr, pd_cap, TEST_VADDR,
-									seL4_ARCH_Default_VMAttributes);
-	ZF_LOGF_IFERR(error, "Failed to map page table into VSpace.\n");
+	// This array needs to be passed to sel4utils_map_page cause this function
+	// will populate it with reference to all additional objects that were
+	// created in order to map the page. num_objects will be updated with the
+	// actual number of objects that will be allocated
 
-	/*finally we map the page*/
-	error = seL4_ARCH_Page_Map(	bram_frame_object.cptr, pd_cap, TEST_VADDR,
-								seL4_ReadWrite, seL4_ARCH_Default_VMAttributes);
+	vka_object_t objects[2];
+	int num_objects = 2;
+
+	seL4_Word *x = (seL4_Word *) TEST_VADDR;
+	error = sel4utils_map_page(	&vka, pd_cap, bram_frame_object.cptr, (void*)x,
+								seL4_ReadWrite, 0, objects, &num_objects);
 	ZF_LOGF_IFERR(error, "Failed again to map the bram frame into the VSpace.\n");
 
-	/* write to the page we mapped */
-	seL4_Word *x = (seL4_Word *) TEST_VADDR;
 	printf("Set x to 5\n");
 	*x = 5;
 	printf("Read x: %lu\n", *x);
