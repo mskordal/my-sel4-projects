@@ -59,12 +59,25 @@ $LLVM_DIR/bin/clang -O0 -fpass-plugin=./libInjectBRAM.so -g ../myLlvmPass/app.c 
 The Pass just prints the non-external functions that are being called
 in the programme.
 
-# Prev Pass State 1
+# Prev Pass State 2
 Switched Function pass to a module pass. The pass create a global pointer
 variable and assigns the address `0xa0010000` to it # Current Pass State.
 
-# Current Pass State
+# Prev Pass State 3
 In main function, the address of the global is loaded to a local pointer, and
 the then the constant value '1' is written to the address pointed by the local
 pointer. This will cause a segmentation when run locally, since there is
 nothing at that address.
+
+# Current Pass State
+A global variable is created with a virtual address mapped on the physical
+address of the HLS design (must be mapped from within the app). The pass adds a
+code sequence on the prologue of each function and after every function call.
+The sequence consists of 3 parts
+1. The first block allocates a local variable
+2. The second block spinlocks on the idle bit of the HLS control signals until
+   the idle bit is 1
+3. The third block writes a positive function ID at the function prologue or
+   0 after a function call, the physical address of the BRAM and then sets
+   to 1 the control bit of the control signals of the HLS which is supposed
+   to send the data across. It is not tested yet
