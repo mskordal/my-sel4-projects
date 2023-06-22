@@ -14,7 +14,6 @@ using namespace llvm;
 #define BRAM_ADDRESS 0xa0010000
 #define HLS_VIRT_ADDR 0x7000000
 
-// store i64 117440512, i64* %6, align 8
 BasicBlock * createCtrlSignalsLocalVarBlock(BasicBlock *thisBblk,
 	BasicBlock *nextBblk, Function *func, LLVMContext& context,
 	AllocaInst** currCtrlSigs);
@@ -26,8 +25,10 @@ BasicBlock *createWriteToHLSBlock(BasicBlock *nextBblk, Function *func,
 	int id, int bramAddr);
 void addTerminatorsToBlocks(BasicBlock *initBblk, BasicBlock *notIdleBblk,
 	BasicBlock *idleBblk, BasicBlock *firstBblk, Value** idleOff);
-bool isBlockComplete(BasicBlock* bblk);
-BasicBlock *getNextBlockofBlock(BasicBlock *bblk);
+std::vector<Instruction*> getCallInsts(std::vector<std::string>& funcNames,
+	Function* func);
+// bool isBlockComplete(BasicBlock* bblk);
+// BasicBlock *getNextBlockofBlock(BasicBlock *bblk);
 
 PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 {
@@ -74,7 +75,8 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 		
 		BasicBlock *firstBblk = &func->getEntryBlock();	
 
-		BasicBlock *initBblk = createCtrlSignalsLocalVarBlock(nullptr, firstBblk, func, context, &currCtrlSigs);
+		BasicBlock *initBblk = createCtrlSignalsLocalVarBlock(nullptr,
+			firstBblk, func, context, &currCtrlSigs);
 		
 		BasicBlock *notIdleBblk = createSpinLockOnIdleBitBlock(firstBblk, func,
 			context, &currCtrlSigs, globVar, &idleOff);
@@ -85,38 +87,22 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 		addTerminatorsToBlocks(initBblk, notIdleBblk, idleBblk, firstBblk,
 			&idleOff);
 
-		std::vector<Instruction*> instructionsToSplit;
+		std::vector<Instruction*> callInsts = getCallInsts(funcNames, func);
 
-		for (Function::iterator bblk = func->begin(); bblk != func->end(); 
-			++bblk)
-		{
- 	    	for (BasicBlock::iterator instr = bblk->begin();
-				instr != bblk->end(); ++instr)
-			{
-				if (dyn_cast<CallInst>(&*instr))
-				{
-					instructionsToSplit.push_back(&*instr);
-					// BasicBlock *newBblk = SplitBlock(&*bblk, &*instr);
-				}
-			}
-		}
-
-		for (Instruction* instr : instructionsToSplit)
+		for (Instruction* instr : callInsts)
 		{
 			BasicBlock* bblk = instr->getParent();
 			Instruction* firstInstr = bblk->getFirstNonPHI();
 			if(firstInstr != instr)
 				bblk = SplitBlock(bblk, instr);
-			//if(!isBlockComplete(bblk))
+
 			BasicBlock* nextBblk = SplitBlock(bblk,
 				instr->getNextNonDebugInstruction());
-			
-			//BasicBlock *nextBblk = bblk->
 
 			BasicBlock *initBblkEnd = createCtrlSignalsLocalVarBlock(bblk,
 				nullptr, func, context, &currCtrlSigs);
 			
-			BasicBlock *notIdleBblkEnd = createSpinLockOnIdleBitBlock(nextBblk, 
+			BasicBlock *notIdleBblkEnd = createSpinLockOnIdleBitBloc(nextBblk, 
 				func, context, &currCtrlSigs, globVar, &idleOff);
 
 			BasicBlock *idleBblkEnd = createWriteToHLSBlock(nextBblk, func,
@@ -291,7 +277,8 @@ BasicBlock *createWriteToHLSBlock(BasicBlock *nextBblk, Function *func,
  * @param iddleOff The Outcome of the condition calculated in the notIdleBblk.
  * Need to add this to a conditional branch here
  */
-void addTerminatorsToBlocks(BasicBlock *initBblk, BasicBlock *notIdleBblk, BasicBlock *idleBblk, BasicBlock *firstBblk, Value** idleOff)
+void addTerminatorsToBlocks(BasicBlock *initBblk, BasicBlock *notIdleBblk,
+	BasicBlock *idleBblk, BasicBlock *firstBblk, Value** idleOff)
 {
 	IRBuilder<> initBblkBuilder(initBblk, initBblk->end());
 	Instruction* termInst = initBblk->getTerminator();
@@ -311,49 +298,88 @@ void addTerminatorsToBlocks(BasicBlock *initBblk, BasicBlock *notIdleBblk, Basic
 }
 
 /**
- * Evaluates whether a basic block is complete or. We consider
- * as complete, a block that contains only the call instruction and a terminator.
+ * Iterates over a function's basic blocks searching for call instructions which
+ * call functions that match the name of the functions we want to instrument.
+ * Finally it returns a vector with those instructions.
+ * @param funcNames A vector containing the function names of which the call
+ * instructions must match with
+ * @param func The function of which we iterate over the basic blocks and
+ * instructions
+ * @return The vector of the maching call instructions
+ */
+std::vector<Instruction*> getCallInsts(std::vector<std::string>& funcNames,
+	Function* func)
+{
+	std::vector<Instruction*> callInsts;
+
+	for (Function::iterator bblk = func->begin(); bblk != func->end(); ++bblk)
+		{
+		for (BasicBlock::iterator instr = bblk->begin(); instr != bblk->end();
+			++instr)
+		{
+			CallInst* callInst = dyn_cast<CallInst>(&*instr);
+			if (callInst)
+			{
+				std::vector<std::string>::iterator funcNamesIt;
+				std::string calledFuncName =
+					callInst->getCalledFunction()->getName().str();
+				//search if called function name exists in vector of names
+				funcNamesIt = std::find(funcNames.begin(), funcNames.end(),
+					calledFuncName);
+				//If it does, push the instruction
+				if(funcNamesIt != funcNames.end())	
+					callInsts.push_back(&*instr);
+			}
+		}
+	}
+	return callInsts;
+}
+
+
+/**
+ * Evaluates whether a basic block is complete or. We consider as complete, a
+ * block that contains only the call instruction and a terminator.
  * @param bblk The basic block to evaluate
  * @return True if block is complete, false otherwsie
  */
-bool isBlockComplete(BasicBlock* bblk)
-{
-	bool isCallInstFirst = false;
-	bool hasTerminator = false;
+// bool isBlockComplete(BasicBlock* bblk)
+// {
+// 	bool isCallInstFirst = false;
+// 	bool hasTerminator = false;
 
-	Instruction* callInst = bblk->getFirstNonPHI();
-	if(dyn_cast<CallInst>(callInst))
-		isCallInstFirst = true;
+// 	Instruction* callInst = bblk->getFirstNonPHI();
+// 	if(dyn_cast<CallInst>(callInst))
+// 		isCallInstFirst = true;
 
-	if(bblk->getTerminator())
-		hasTerminator = true;
+// 	if(bblk->getTerminator())
+// 		hasTerminator = true;
 
-	if(isCallInstFirst && hasTerminator && (bblk->size() == 2))
-		return true;
-	return false;
-}
+// 	if(isCallInstFirst && hasTerminator && (bblk->size() == 2))
+// 		return true;
+// 	return false;
+// }
 
 /**
  * Gives the next Basic Block of the given Basic Block in code if it exists.
  * @param bblk The basic block of which we want to return the next
  * @return The next basic block of bblk code-wise. Null otherwise.
  */
-BasicBlock *getNextBlockofBlock(BasicBlock *bblk)
-{
-	Function* func = bblk->getParent();
+// BasicBlock *getNextBlockofBlock(BasicBlock *bblk)
+// {
+// 	Function* func = bblk->getParent();
 
-	for (Function::iterator ibblk = func->begin(); ibblk != func->end(); 
-		++ibblk)
-	{
-		if(&*ibblk == bblk)
-		{
-			++ibblk;
-			if(ibblk != func->end())
-				return &*ibblk;
-		}
-	}
-	return nullptr;
-}
+// 	for (Function::iterator ibblk = func->begin(); ibblk != func->end(); 
+// 		++ibblk)
+// 	{
+// 		if(&*ibblk == bblk)
+// 		{
+// 			++ibblk;
+// 			if(ibblk != func->end())
+// 				return &*ibblk;
+// 		}
+// 	}
+// 	return nullptr;
+// }
 
 //-----------------------------------------------------------------------------
 // New PM Registration - use this for loading the pass on a c file with clang
