@@ -40,6 +40,9 @@ MakeCPIO(archive.o "$<TARGET_FILE:app>")
 
 add_executable(vkamapping archive.o src/main.c)
 
+# Include the pass in the main elf file
+target_compile_options(vkamapping PRIVATE -O0 -fpass-plugin=/home/mskordal/workspace/myRepos/my-sel4-projects/llvmpassbuild/libInjectBRAM.so)
+
 target_link_libraries(vkamapping
 	sel4 muslc utils sel4muslcsys
 	sel4platsupport sel4utils sel4debug
