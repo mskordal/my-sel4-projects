@@ -5,6 +5,20 @@ the LLVM pass.
 
 # Current version
 The IP receives 2 values from the software application. An index and a hardware
+address that corresponds to the BRAM, where the IP writes.
+BRAM is split to 2 parts.
+1. Part 1 is where the call graph is stored. When a positive ID arrives it means
+   a functions has just been called. On every two bytes, the IP stores the
+   function ID on the first byte, and the level of the function in the call
+   graph on the second byte.
+2. Part 2 is used as a stack to track how deep we are in the call stack and who
+   is the parent function of each function that is called. When an ID > 0
+   arrives, the index of where the function is stored in the call graph, is
+   pushed in the stack. When ID==0 arrives, the stack is popped indicating that
+   a function has just returned.
+
+# Previous version 1
+The IP receives 2 values from the software application. An index and a hardware
 address that corresponds to the BRAM. When starting the IP through the control
 register, the IP will increment a specific location in BRAM based on the index
 received.
