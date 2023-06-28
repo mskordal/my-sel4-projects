@@ -43,7 +43,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 		funcNames.push_back( line.substr(0, delim_pos) );
 		funcIds.push_back( stoi( line.substr( delim_pos + 1, line.length() - delim_pos + 1 ) ) );
 	}
-	errs() << "test\n";
+	errs() << "tesdawdawdawdwadat\n";
 	for(int i=0; i < funcNames.size(); i++)
 	{
 		errs() << funcNames.at(i) << ": " << funcIds.at(i) << '\n';
@@ -70,6 +70,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 	{
 		AllocaInst* currCtrlSigs;
 		Value* idleOff;
+
 		// get function the function
 		Function *func = M.getFunction(funcNames.at(i));
 		
@@ -102,7 +103,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 			BasicBlock *initBblkEnd = createCtrlSignalsLocalVarBlock(bblk,
 				nullptr, func, context, &currCtrlSigs);
 			
-			BasicBlock *notIdleBblkEnd = createSpinLockOnIdleBitBloc(nextBblk, 
+			BasicBlock *notIdleBblkEnd = createSpinLockOnIdleBitBlock(nextBblk, 
 				func, context, &currCtrlSigs, globVar, &idleOff);
 
 			BasicBlock *idleBblkEnd = createWriteToHLSBlock(nextBblk, func,
@@ -247,9 +248,9 @@ BasicBlock *createWriteToHLSBlock(BasicBlock *nextBblk, Function *func,
 	LoadInst *currSigs = builder.CreateAlignedLoad(
 		IntegerType::getInt32Ty(context), *currCtrlSigs, MaybeAlign(4));
 
-	// Create an OR inst to set the the LS bit of currSigs
+	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
 	Value * startBitSet = builder.CreateOr(currSigs,
-		ConstantInt::get(context, APInt(32, 1)));
+		ConstantInt::get(context, APInt(32, 0x11)));
 
 	// Create a load inst to read the address of the global pointer variable
 	LoadInst *hlsAddrCtrl = builder.CreateLoad(
@@ -384,54 +385,54 @@ std::vector<Instruction*> getCallInsts(std::vector<std::string>& funcNames,
 //-----------------------------------------------------------------------------
 // New PM Registration - use this for loading the pass on a c file with clang
 //-----------------------------------------------------------------------------
-//llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
-//{
-	////std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
-	//return
-	//{
-		//LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
-		//[](PassBuilder &PB)
-		//{
-			//PB.registerOptimizerEarlyEPCallback
-			//(
-				//[](ModulePassManager &MPM, OptimizationLevel)
-				//{
-					//MPM.addPass(InjectBRAMMod());
-					//return true;
-				//}
-			//);
-		//}
-	//};
-//}
+llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
+{
+	//std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
+	return
+	{
+		LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
+		[](PassBuilder &PB)
+		{
+			PB.registerOptimizerEarlyEPCallback
+			(
+				[](ModulePassManager &MPM, OptimizationLevel)
+				{
+					MPM.addPass(InjectBRAMMod());
+					return true;
+				}
+			);
+		}
+	};
+}
 
 
 //-----------------------------------------------------------------------------
 // New PM Registration - use this for loading the pass on an ll file with opt
 //-----------------------------------------------------------------------------
- llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
- {
-	 //std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
-	 return
-	 {
-		 LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
-		 [](PassBuilder &PB)
-		 {
-			 PB.registerPipelineParsingCallback
-			 (
-				 [](StringRef Name, ModulePassManager &MPM,
-				 ArrayRef<PassBuilder::PipelineElement>)
-				 {
-					 if (Name == "inject-bram")
-					 {
-						 MPM.addPass(InjectBRAMMod());
-						 return true;
-					 }
-					 return false;
-				 }
-			 );
-		 }
-	 };
- }
+//  llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
+//  {
+// 	 //std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
+// 	 return
+// 	 {
+// 		 LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
+// 		 [](PassBuilder &PB)
+// 		 {
+// 			 PB.registerPipelineParsingCallback
+// 			 (
+// 				 [](StringRef Name, ModulePassManager &MPM,
+// 				 ArrayRef<PassBuilder::PipelineElement>)
+// 				 {
+// 					 if (Name == "inject-bram")
+// 					 {
+// 						 MPM.addPass(InjectBRAMMod());
+// 						 return true;
+// 					 }
+// 					 return false;
+// 				 }
+// 			 );
+// 		 }
+// 	 };
+//  }
 
 
 
