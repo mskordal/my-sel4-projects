@@ -4,6 +4,37 @@ Vitis HLS. The IP is used on ZCU102 in conjuction with the SeL4 application and
 the LLVM pass.
 
 # Current version
+The IP now stores information about a function that is called additionally to
+assembling a call graph. It receives a total of 8 64bit parameters split into
+16 32bits. Here they will be described as 8 64bits. Those are:
+- NodeData (Parameter 0): Each byte holds different information:
+   - byte 0: Function ID
+   - byte 1: Event 0 ID
+   - byte 2: Event 1 ID
+   - byte 3: Event 2 ID
+   - byte 4: Event 3 ID
+   - byte 5: Event 4 ID
+   - byte 6: Event 5 ID
+   - byte 7: Function level in the call stack
+- cpyCycles (parameter 1): The number of CPU cycles gathered while this 
+  function was running.
+- event 0 - 5 (Parameters 2 - 7): The number of triggers that happened for each 
+  corresponding event while this function was running.
+The IP is triggered in two different occasions and in each occasion it uses different parameters. The 2 occasions are explained below:
+1. When a function is called The pass writes in NodeData the Function and event
+   ID for each byte. Function level is ignored as this is determined in the
+   hardware. All other parameters are ignored in this case. The hardware stores
+   NodeData some where in BRAM and leaves the next 14 bytes empty to be filled
+   later. Then it updates the BRAM index to store nodeData for the next function
+   when it arrives.
+2. When a function terminates, the pass writes in NodeData byte 0 the number 0,
+   indicating that the hardware was triggered due to function termination.
+   Parameters for cpu cycles and events 0 - 5 are filled as well, then the
+   hardware is triggered. The hardware then locates the index to where the
+   nodeData of this function is located and fills the rest of the bytes with the
+   cpu cycles and event information.
+
+# Previous version 2
 The IP receives 2 values from the software application. An index and a hardware
 address that corresponds to the BRAM, where the IP writes.
 BRAM is split to 2 parts.
