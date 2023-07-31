@@ -5,5 +5,6 @@
 
 #define graph_index_t ap_int<16>
 #define stack_index_t ap_int<16>
+#define call_graph_t ap_uint<32>
 
 #endif /* ATTESTER_TYPES_H_ */
