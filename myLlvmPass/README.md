@@ -90,7 +90,7 @@ The sequence consists of 3 parts
    to 1 the control bit of the control signals of the HLS which is supposed
    to send the data across. It is not tested yet
 
-# Current Pass State
+# Prev Pass state 5
 The pass inject instructions to a source file. at the prologue of each function
 and after a function has returned. These instructions write to the HLS IP either
 the function ID being called during the prologue or 0 to notify that a function
@@ -126,3 +126,75 @@ just returned. In particular, the pass performs the following steps:
 If the pass operates on functions, there is a chance that the compiler will
 optimize them out before the pass can inject any instruction. In that case
 remember to compile with `-O0`.
+
+# Notes
+
+## Hardware offsets
+```
+BUS_A
+0x00 : Control signals
+       bit 0  - ap_start (Read/Write/COH)
+       bit 1  - ap_done (Read)
+       bit 2  - ap_idle (Read)
+       bit 3  - ap_ready (Read/COR)
+       bit 4  - ap_continue (Read/Write/SC)
+       bit 7  - auto_restart (Read/Write)
+       bit 9  - interrupt (Read)
+       others - reserved
+0x04 : Global Interrupt Enable Register
+       bit 0  - Global Interrupt Enable (Read/Write)
+       others - reserved
+0x08 : IP Interrupt Enable Register (Read/Write)
+       bit 0 - enable ap_done interrupt (Read/Write)
+       bit 1 - enable ap_ready interrupt (Read/Write)
+       others - reserved
+0x0c : IP Interrupt Status Register (Read/TOW)
+       bit 0 - ap_done (Read/TOW)
+       bit 1 - ap_ready (Read/TOW)
+       others - reserved
+0x10 : Data signal of nodeData
+       bit 31~0 - nodeData[31:0] (Read/Write)
+0x14 : Data signal of nodeData
+       bit 31~0 - nodeData[63:32] (Read/Write)
+0x18 : reserved
+0x1c : Data signal of cpuCycles
+       bit 31~0 - cpuCycles[31:0] (Read/Write)
+0x20 : Data signal of cpuCycles
+       bit 31~0 - cpuCycles[63:32] (Read/Write)
+0x24 : reserved
+0x28 : Data signal of event0
+       bit 31~0 - event0[31:0] (Read/Write)
+0x2c : Data signal of event0
+       bit 31~0 - event0[63:32] (Read/Write)
+0x30 : reserved
+0x34 : Data signal of event1
+       bit 31~0 - event1[31:0] (Read/Write)
+0x38 : Data signal of event1
+       bit 31~0 - event1[63:32] (Read/Write)
+0x3c : reserved
+0x40 : Data signal of event2
+       bit 31~0 - event2[31:0] (Read/Write)
+0x44 : Data signal of event2
+       bit 31~0 - event2[63:32] (Read/Write)
+0x48 : reserved
+0x4c : Data signal of event3
+       bit 31~0 - event3[31:0] (Read/Write)
+0x50 : Data signal of event3
+       bit 31~0 - event3[63:32] (Read/Write)
+0x54 : reserved
+0x58 : Data signal of event4
+       bit 31~0 - event4[31:0] (Read/Write)
+0x5c : Data signal of event4
+       bit 31~0 - event4[63:32] (Read/Write)
+0x60 : reserved
+0x64 : Data signal of event5
+       bit 31~0 - event5[31:0] (Read/Write)
+0x68 : Data signal of event5
+       bit 31~0 - event5[63:32] (Read/Write)
+0x6c : reserved
+0x70 : Data signal of bram
+       bit 31~0 - bram[31:0] (Read/Write)
+0x74 : Data signal of bram
+       bit 31~0 - bram[63:32] (Read/Write)
+0x78 : reserved
+```

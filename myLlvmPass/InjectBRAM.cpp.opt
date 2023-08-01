@@ -1,3 +1,7 @@
+/**
+ * THIS IS FOR USING WITH OPT. MAIN DIF ARE THE FUNCTION DECLARATIONS
+ */
+
 #include "InjectBRAM.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
@@ -92,6 +96,28 @@ GlobalVariable* globalEventVars[EVENTS_NUM];
 //32bit ctrl sigs, 32bit nodedata ls/ms, 64bit cpu cycles, 64bit event 0-5
 AllocaInst* localEventVars[10];
 
+/*
+ *Externally declared functions call from sel4bench library.
+ */
+Function *sel4BenchInitFunc; ///< void sel4bench_init()
+Function *sel4BenchRstCounts; ///< static FASTFN void sel4bench_reset_counters
+							  ///< (void)	
+Function *sel4BenchSetCountEventFunc; ///< static FASTFN void
+									  ///< sel4bench_set_count_event (counter_t 
+									  ///< counter, event_id_t event)
+Function *sel4BenchStartCountsFunc;	///< static FASTFN void 
+									///< sel4bench_set_count_event(counter_t 
+									///< counter, event_id_t event)
+Function *sel4BenchPrivReadPmcrFunc; ///< static FASTFN uint32_t 
+									 ///< sel4bench_private_read_pmcr(void)
+Function *sel4BenchPrivWritePmcrFunc; ///< static FASTFN void
+									  ///< sel4bench_private_write_pmcr
+									  ///< (uint32_t val)
+Function *sel4BenchGetCycleCountFunc; ///< static FASTFN ccnt_t
+									  ///< sel4bench_get_cycle_count()
+Function *sel4BenchGetCounterFunc; ///< static FASTFN ccnt_t
+								   ///< sel4bench_get_counter(counter_t
+								   ///< counter)
 PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 {
 	std::string line;
@@ -152,25 +178,57 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 			ConstantInt::get(context, APInt(64, 0)));
 	}
 
-	Function *mainFunc = M.getFunction("main");
-		
-	BasicBlock *mainFirstBblk = &mainFunc->getEntryBlock();	
+	/**
+	 * Create the external declarations of functions.
+	 */
+	// Create an external declaration of sel4bench_init
+	sel4BenchInitFunc = Function::Create(
+		FunctionType::get(Type::getVoidTy(context), false), 
+		Function::ExternalLinkage, "sel4bench_init", &M);
 
-	IRBuilder<> mainBuilder(mainFirstBblk, mainFirstBblk->begin());
+	// Create an external declaration of sel4bench_reset_counters
+	sel4BenchRstCounts = Function::Create(
+		FunctionType::get(Type::getVoidTy(context), false), 
+		Function::ExternalLinkage, "sel4bench_reset_counters", &M);
 
-	mainBuilder.CreateCall(Mp->getFunction("sel4bench_init"));
-	
-	// Create 6 call instructions to sel4bench_set_count_event
-	for(int i = 0; i < 6; ++i)
-	{
-		Value* s4bsceArgs[2] =
-		{
-			ConstantInt::get(context, APInt(64, i)),
-			ConstantInt::get(context, APInt(64, eventIDs[i]))
-		};
-		mainBuilder.CreateCall(Mp->getFunction("sel4bench_set_count_event"),
-			s4bsceArgs);
-	}
+	// Create an external declaration of sel4bench_start_counters
+	Type* s4bscParam[1] = { Type::getInt64Ty(context) };
+	FunctionType* s4bscFt = FunctionType::get(Type::getVoidTy(context),
+		s4bscParam, false);
+	sel4BenchStartCountsFunc = Function::Create(s4bscFt, 
+		Function::ExternalLinkage, "sel4bench_start_counters", &M);
+
+	// Create an external declaration of sel4bench_set_count_event
+	Type* s4bsceParams[2] = { Type::getInt64Ty(context),
+		Type::getInt64Ty(context) };
+	FunctionType * s4bsceFt = FunctionType::get(Type::getVoidTy(context),
+		s4bsceParams, false);
+	sel4BenchSetCountEventFunc = Function::Create(s4bsceFt, 
+		Function::ExternalLinkage, "sel4bench_set_count_event", &M);
+
+	// Create an external declaration of sel4bench_private_read_pmcr
+	sel4BenchPrivReadPmcrFunc = Function::Create(
+		FunctionType::get(Type::getInt32Ty(context), false),
+		Function::ExternalLinkage, "sel4bench_private_read_pmcr", &M);
+
+	// Create an external declaration of sel4bench_private_write_pmcr
+	Type* s4bpwpParam[1] = { Type::getInt32Ty(context) };
+	FunctionType* s4bpwpFt = FunctionType::get(Type::getVoidTy(context),
+		s4bscParam, false);
+	sel4BenchPrivWritePmcrFunc = Function::Create(s4bpwpFt, 
+		Function::ExternalLinkage, "sel4bench_private_write_pmcr", &M);
+
+	// Create an external declaration of sel4bench_private_read_pmcr
+	sel4BenchGetCycleCountFunc = Function::Create(
+		FunctionType::get(Type::getInt64Ty(context), false),
+		Function::ExternalLinkage, "sel4bench_get_cycle_count", &M);
+
+	// Create an external declaration of sel4bench_start_counters
+	Type* s4bgcParam[1] = { Type::getInt64Ty(context) };
+	FunctionType* s4bgcFt = FunctionType::get(Type::getInt64Ty(context),
+		s4bscParam, false);
+	sel4BenchGetCounterFunc = Function::Create(s4bgcFt, 
+		Function::ExternalLinkage, "sel4bench_get_counter", &M);
 
 	for(int i = 0; i < funcNames.size(); ++i)
 	{
@@ -187,7 +245,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 			context, &idleOff);
 
 		BasicBlock *idleBblk = writeFuncStartToHlsBlock(firstBblk, func,
-			context, funcIds.at(i));
+            context, funcIds.at(i));
 
 		addTerminatorsToBlocks(initBblk, notIdleBblk, idleBblk, firstBblk,
 			&idleOff);
@@ -419,14 +477,13 @@ BasicBlock *writeFuncStartToHlsBlock(BasicBlock *nextBblk, Function *func,
 	builder.CreateStore(startBitSet, hlsAddr0);
 	
 	// Create a call inst to sel4bench_reset_counters
-	builder.CreateCall(Mp->getFunction("sel4bench_reset_counters"));
+	builder.CreateCall(sel4BenchRstCounts);
 
 	// Create a call inst to sel4bench_start_counters/ 0x3F = 0b111111
 	Value* s4bsceArg[1] = { ConstantInt::get(context, APInt(64, 0x3F)) };
-	builder.CreateCall(Mp->getFunction("sel4bench_start_counters"), s4bsceArg);
+	builder.CreateCall(sel4BenchStartCountsFunc, s4bsceArg);
 	
-	CallInst* readPmcr = builder.CreateCall(
-		Mp->getFunction("sel4bench_private_read_pmcr"));
+	CallInst* readPmcr = builder.CreateCall(sel4BenchPrivReadPmcrFunc);
 
 	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
 	Value * cycleCounter = builder.CreateOr(readPmcr,
@@ -434,8 +491,7 @@ BasicBlock *writeFuncStartToHlsBlock(BasicBlock *nextBblk, Function *func,
 
 	// Create a call inst to sel4bench_private_write_pmcr
 	Value* s4bpwpArg[1] = { cycleCounter };
-	builder.CreateCall(Mp->getFunction("sel4bench_private_write_pmcr"),
-		s4bpwpArg);
+	builder.CreateCall(sel4BenchPrivWritePmcrFunc, s4bpwpArg);
 
 	return bblk;
 }
@@ -500,12 +556,12 @@ BasicBlock *writeFuncEndToHlsBlock(BasicBlock *nextBblk, Function *func,
 
 			// Create a load inst to read the address of the global pointer
 			// variable
-			LoadInst *hlsAddr = builder.CreateLoad(
+			LoadInst *hlsAddr = builder->CreateLoad(
 			hlsAddrVar->getValueType(), hlsAddrVar);
 
 			// Create a getelemntptr inst to get the adress of the index 
             // required to write specific event
-			Value* hlsAddrAtIndex = builder.CreateConstInBoundsGEP1_64(
+			Value* hlsAddrAtIndex = builder->CreateConstInBoundsGEP1_64(
 				IntegerType::getInt32Ty(context),
 				hlsAddr, 7 + currEvent + currHalf);
 
@@ -576,14 +632,13 @@ BasicBlock *writeFuncEndToHlsBlock(BasicBlock *nextBblk, Function *func,
 	}
 	
 	// Create a call inst to sel4bench_reset_counters
-	builder.CreateCall(Mp->getFunction("sel4bench_reset_counters"));
+	builder.CreateCall(sel4BenchRstCounts);
 
 	// Create a call inst to sel4bench_start_counters/ 0x3F = 0b111111
 	Value* s4bsceArg[1] = { ConstantInt::get(context, APInt(64, 0x3F)) };
-	builder.CreateCall(Mp->getFunction("sel4bench_start_counters"), s4bsceArg);
+	builder.CreateCall(sel4BenchStartCountsFunc, s4bsceArg);
 	
-	CallInst* readPmcr = builder.CreateCall(
-		Mp->getFunction("sel4bench_private_read_pmcr"));
+	CallInst* readPmcr = builder.CreateCall(sel4BenchPrivReadPmcrFunc);
 
 	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
 	Value * cycleCounter = builder.CreateOr(readPmcr,
@@ -591,8 +646,7 @@ BasicBlock *writeFuncEndToHlsBlock(BasicBlock *nextBblk, Function *func,
 
 	// Create a call inst to sel4bench_private_write_pmcr
 	Value* s4bpwpArg[1] = { cycleCounter };
-	builder.CreateCall(Mp->getFunction("sel4bench_private_read_pmcr"), 
-		s4bpwpArg);
+	builder.CreateCall(sel4BenchPrivWritePmcrFunc, s4bpwpArg);
 
 	return bblk;
 }
@@ -611,8 +665,7 @@ void readCountersBeforeCallBlock(BasicBlock *thisBblk, LLVMContext& context)
 	IRBuilder<> builder(thisBblk, thisBblk->begin());
 
 	// Create a Call Inst to sel4bench_get_cycle_count to get cpu cycles
-	CallInst* cycleCount = builder.CreateCall(
-		Mp->getFunction("sel4bench_get_cycle_count"));
+	CallInst* cycleCount = builder.CreateCall(sel4BenchGetCycleCountFunc);
 
 	// Create a load inst to read the value of the local event variable
 	LoadInst *localCpuCyclesVal = builder.CreateLoad(
@@ -630,8 +683,8 @@ void readCountersBeforeCallBlock(BasicBlock *thisBblk, LLVMContext& context)
 	for (int i = 1; i < EVENTS_NUM; ++i)
 	{
 		Value* s4bgcArg[1] = { ConstantInt::get(context, APInt(64, i-1)) };
-		CallInst* eventCount = builder.CreateCall(
-			Mp->getFunction("sel4bench_get_counter"), s4bgcArg);
+		CallInst* eventCount = builder.CreateCall(sel4BenchGetCounterFunc,
+			s4bgcArg);
 		LoadInst *localeventCount = builder.CreateLoad(
 			localEventVars[i]->getAllocatedType(), localEventVars[i]);
 		Value *totalEventCount = builder.CreateAdd(localeventCount, eventCount);
@@ -652,8 +705,7 @@ void writeGlobalsBeforeReturnBlock(BasicBlock *thisBblk, LLVMContext& context)
 	IRBuilder<> builder(thisBblk, thisBblk->begin());
 
 	// Create a Call Inst to sel4bench_get_cycle_count to get cpu cycles
-	CallInst* cycleCount = builder.CreateCall(
-		Mp->getFunction("sel4bench_get_cycle_count"));
+	CallInst* cycleCount = builder.CreateCall(sel4BenchGetCycleCountFunc);
 
 	// Create a load inst to read the value of the local event variable
 	LoadInst *localCpuCyclesVal = builder.CreateLoad(
@@ -671,8 +723,8 @@ void writeGlobalsBeforeReturnBlock(BasicBlock *thisBblk, LLVMContext& context)
 	for (int i = 1; i < EVENTS_NUM; ++i)
 	{
 		Value* s4bgcArg[1] = { ConstantInt::get(context, APInt(64, i-1)) };
-		CallInst* eventCount = builder.CreateCall(
-			Mp->getFunction("sel4bench_get_counter"), s4bgcArg);
+		CallInst* eventCount = builder.CreateCall(sel4BenchGetCounterFunc,
+			s4bgcArg);
 		LoadInst *localEventVal = builder.CreateLoad(
 			localEventVars[i]->getAllocatedType(), localEventVars[i]);
 		Value *totalEvent = builder.CreateAdd(localEventVal, eventCount);
@@ -848,54 +900,54 @@ void insertPrint(IRBuilder<> &builder, std::string msg, Value* val, Module* m)
 //-----------------------------------------------------------------------------
 // New PM Registration - use this for loading the pass on a c file with clang
 //-----------------------------------------------------------------------------
-llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
-{
-	//std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
-	return
-	{
-		LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
-		[](PassBuilder &PB)
-		{
-			PB.registerOptimizerEarlyEPCallback
-			(
-				[](ModulePassManager &MPM, OptimizationLevel)
-				{
-					MPM.addPass(InjectBRAMMod());
-					return true;
-				}
-			);
-		}
-	};
-}
+// llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
+// {
+// 	//std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
+// 	return
+// 	{
+// 		LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
+// 		[](PassBuilder &PB)
+// 		{
+// 			PB.registerOptimizerEarlyEPCallback
+// 			(
+// 				[](ModulePassManager &MPM, OptimizationLevel)
+// 				{
+// 					MPM.addPass(InjectBRAMMod());
+// 					return true;
+// 				}
+// 			);
+// 		}
+// 	};
+// }
 
 
 // -----------------------------------------------------------------------------
 // New PM Registration - use this for loading the pass on an ll file with opt
 // -----------------------------------------------------------------------------
-//  llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
-//  {
-// 	 //std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
-// 	 return
-// 	 {
-// 		 LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
-// 		 [](PassBuilder &PB)
-// 		 {
-// 			 PB.registerPipelineParsingCallback
-// 			 (
-// 				 [](StringRef Name, ModulePassManager &MPM,
-// 				 ArrayRef<PassBuilder::PipelineElement>)
-// 				 {
-// 					 if (Name == "inject-bram")
-// 					 {
-// 						 MPM.addPass(InjectBRAMMod());
-// 						 return true;
-// 					 }
-// 					 return false;
-// 				 }
-// 			 );
-// 		 }
-// 	 };
-//  }
+ llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
+ {
+	 //std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
+	 return
+	 {
+		 LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
+		 [](PassBuilder &PB)
+		 {
+			 PB.registerPipelineParsingCallback
+			 (
+				 [](StringRef Name, ModulePassManager &MPM,
+				 ArrayRef<PassBuilder::PipelineElement>)
+				 {
+					 if (Name == "inject-bram")
+					 {
+						 MPM.addPass(InjectBRAMMod());
+						 return true;
+					 }
+					 return false;
+				 }
+			 );
+		 }
+	 };
+ }
 
 
 
