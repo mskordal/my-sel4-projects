@@ -28,3 +28,9 @@ llvmpassbuild/
 
 #vscode files and directories
 .vscode
+
+#misc extensions
+*.out
+*.bak
+*.pdf
+*.ila
