@@ -62,35 +62,44 @@ $LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram -disa
 $LLVM_DIR/bin/clang -O0 -fpass-plugin=./libInjectBRAM.so -g ../myLlvmPass/app.c -o app
 
 ```
+# Version 6 (current)
+The pass now not only creates a call graph of the functions that are called but
+also enables and starts the performance counters of the PMU. When a function
+terminates, the results of 6 events selected and the cpu cycles are sent over to
+the call graph. The pass operates on 2 modes. On the first mode, the pass
+injects instruction for writing to the HLS IP while on the second mode, it
+injects calls to the software implementation of the HLS IP. By
+uncommenting/commenting `#define USE_HLS` on can switch between those 2 modes.
+There is also a define `DEBUG_PRINT`. This enables the injection of printfs with
+desired data in the program for debugging.
 
-# Prev Pass State 1
-The Pass just prints the non-external functions that are being called
-in the programme.
+a53 cores which run on ZCU102 support up to 6 simultaneous events to count plus
+CPU cycles. To choose the appropriate events, look over the list of events set
+as defines and then switch the defines `EVENT_0` to `EVENT_5` according to the
+events you want to measure. CPU cycle counting is always active.
 
-# Prev Pass State 2
-Switched Function pass to a module pass. The pass creates a global pointer
-variable and assigns the address `0xa0010000` to it.
+The pass performs the following actions to the application:
+1. In the beginning of the main function it adds calls to the performance
+   counters initialization.
+2. Then for every function listed in `functions.txt`, in the beginning it will
+   create local variables, and will send the function ID and event IDs to the
+   HLS. If `USE_HLS` is set, the pass will also spin on the idle bit of the
+   hardware to make sure multiple writes will not overlap and corrupt the data.
+   After that, it injects calls that resets the counters to start counting from
+   the beginnig of the function.
+3. In the body of those functions and main, the pass searches for calls to those
+   same functions. Before each call instruction, the pass stores the current
+   event values since when the function will be called, the counters will be
+   reset. Then right after the call, the pass loads the global variable values
+   that held the callee's values to add them to the local function's values and
+   also send those global values to HLS to store the event counts for that
+   callee.
+4. Before the return instruction of every function, the pass stores current
+   event counts to the global variables.
+5. For the software HLS mode, the pass also injects the call graph print before
+   the return of main.
 
-# Prev Pass State 3
-In main function, the address of the global is loaded to a local pointer, and
-the then the constant value '1' is written to the address pointed by the local
-pointer. This will cause a segmentation when run locally, since there is
-nothing at that address.
-
-# Prev Pass State 4
-A global variable is created with a virtual address mapped on the physical
-address of the HLS design (must be mapped from within the app). The pass adds a
-code sequence on the prologue of each function and after every function call.
-The sequence consists of 3 parts
-1. The first block allocates a local variable
-2. The second block spinlocks on the idle bit of the HLS control signals until
-   the idle bit is 1
-3. The third block writes a positive function ID at the function prologue or
-   0 after a function call, the physical address of the BRAM and then sets
-   to 1 the control bit of the control signals of the HLS which is supposed
-   to send the data across. It is not tested yet
-
-# Prev Pass state 5
+# Version 5
 The pass inject instructions to a source file. at the prologue of each function
 and after a function has returned. These instructions write to the HLS IP either
 the function ID being called during the prologue or 0 to notify that a function
@@ -122,6 +131,33 @@ just returned. In particular, the pass performs the following steps:
    previous sequence of functions up to `addTerminatorsToBlocks`, in order to
    send to the HLS IP notice, that a function has just returned.
 
+# Version 4
+A global variable is created with a virtual address mapped on the physical
+address of the HLS design (must be mapped from within the app). The pass adds a
+code sequence on the prologue of each function and after every function call.
+The sequence consists of 3 parts
+1. The first block allocates a local variable
+2. The second block spinlocks on the idle bit of the HLS control signals until
+   the idle bit is 1
+3. The third block writes a positive function ID at the function prologue or
+   0 after a function call, the physical address of the BRAM and then sets
+   to 1 the control bit of the control signals of the HLS which is supposed
+   to send the data across. It is not tested yet
+
+# Version 3
+In main function, the address of the global is loaded to a local pointer, and
+the then the constant value '1' is written to the address pointed by the local
+pointer. This will cause a segmentation when run locally, since there is
+nothing at that address.
+
+# Version 2
+Switched Function pass to a module pass. The pass creates a global pointer
+variable and assigns the address `0xa0010000` to it.
+
+# Version 1
+The Pass just prints the non-external functions that are being called
+in the programme.
+
 # Trivia
 If the pass operates on functions, there is a chance that the compiler will
 optimize them out before the pass can inject any instruction. In that case
@@ -129,72 +165,3 @@ remember to compile with `-O0`.
 
 # Notes
 
-## Hardware offsets
-```
-BUS_A
-0x00 : Control signals
-       bit 0  - ap_start (Read/Write/COH)
-       bit 1  - ap_done (Read)
-       bit 2  - ap_idle (Read)
-       bit 3  - ap_ready (Read/COR)
-       bit 4  - ap_continue (Read/Write/SC)
-       bit 7  - auto_restart (Read/Write)
-       bit 9  - interrupt (Read)
-       others - reserved
-0x04 : Global Interrupt Enable Register
-       bit 0  - Global Interrupt Enable (Read/Write)
-       others - reserved
-0x08 : IP Interrupt Enable Register (Read/Write)
-       bit 0 - enable ap_done interrupt (Read/Write)
-       bit 1 - enable ap_ready interrupt (Read/Write)
-       others - reserved
-0x0c : IP Interrupt Status Register (Read/TOW)
-       bit 0 - ap_done (Read/TOW)
-       bit 1 - ap_ready (Read/TOW)
-       others - reserved
-0x10 : Data signal of nodeData
-       bit 31~0 - nodeData[31:0] (Read/Write)
-0x14 : Data signal of nodeData
-       bit 31~0 - nodeData[63:32] (Read/Write)
-0x18 : reserved
-0x1c : Data signal of cpuCycles
-       bit 31~0 - cpuCycles[31:0] (Read/Write)
-0x20 : Data signal of cpuCycles
-       bit 31~0 - cpuCycles[63:32] (Read/Write)
-0x24 : reserved
-0x28 : Data signal of event0
-       bit 31~0 - event0[31:0] (Read/Write)
-0x2c : Data signal of event0
-       bit 31~0 - event0[63:32] (Read/Write)
-0x30 : reserved
-0x34 : Data signal of event1
-       bit 31~0 - event1[31:0] (Read/Write)
-0x38 : Data signal of event1
-       bit 31~0 - event1[63:32] (Read/Write)
-0x3c : reserved
-0x40 : Data signal of event2
-       bit 31~0 - event2[31:0] (Read/Write)
-0x44 : Data signal of event2
-       bit 31~0 - event2[63:32] (Read/Write)
-0x48 : reserved
-0x4c : Data signal of event3
-       bit 31~0 - event3[31:0] (Read/Write)
-0x50 : Data signal of event3
-       bit 31~0 - event3[63:32] (Read/Write)
-0x54 : reserved
-0x58 : Data signal of event4
-       bit 31~0 - event4[31:0] (Read/Write)
-0x5c : Data signal of event4
-       bit 31~0 - event4[63:32] (Read/Write)
-0x60 : reserved
-0x64 : Data signal of event5
-       bit 31~0 - event5[31:0] (Read/Write)
-0x68 : Data signal of event5
-       bit 31~0 - event5[63:32] (Read/Write)
-0x6c : reserved
-0x70 : Data signal of bram
-       bit 31~0 - bram[31:0] (Read/Write)
-0x74 : Data signal of bram
-       bit 31~0 - bram[63:32] (Read/Write)
-0x78 : reserved
-```
