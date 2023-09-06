@@ -22,6 +22,7 @@
 
 #include <sel4bench/sel4bench.h>
 
+#include <attester_sw.h>
 
 #define HLS_BASE_ADDR				0xa0000000
 #define HLS_FUNCTION_COUNTER_OFFSET	0x10

@@ -29,6 +29,7 @@ musllibc_setup_build_environment_with_sel4runtime()
 sel4_import_libsel4()
 util_libs_import_libraries()
 sel4_libs_import_libraries()
+attester_sw_import_library()
 
 add_executable(app src/app.c)
 
@@ -51,7 +52,7 @@ target_compile_options(vkamapping PRIVATE -O0 -fpass-plugin=/home/mskordal/works
 target_link_libraries(vkamapping 
 	sel4 muslc utils sel4muslcsys
 	sel4platsupport sel4utils sel4debug
-	sel4allocman sel4bench )
+	sel4allocman sel4bench attester_sw)
 
 
 include(rootserver)
