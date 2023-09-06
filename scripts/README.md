@@ -4,7 +4,11 @@
 This script parses a C source file and outputs locally defined functions along
 with an id for them separated by space. The main function is guar anteed to get
 id 1 while every other function will get id >=2 determined by alphabetical
-order. Output is written on the `functions.txt` file.
+order. Output is written on the `functions.txt` file. 
+
+**NOTE**: Remove the main function for now from the list. There is the issue
+where the page to the HLS IP address is mapped in the main function and the pass
+does not do that yet.
 
 example output:
 ```txt
@@ -21,8 +25,26 @@ perform the following actions:
 1. Cleans the build directory, builds make files with cmake and creates an IR
    file called app.ll from app.c using clang.
 2. Compiles the pass with make.
-3. Injects the pass on the source file app.c using clang and produces app executable.
+3. Injects the pass on the source file app.c using clang and produces app
+   executable.
 4. Injects the pass on the IR file app.ll using opt and produces app executable.
 
 For instruction run with -h or open and view instructions in the beginning of
 the script.
+
+## sel4-compile.sh
+Automates the compilation and build process of sel4. Must run from within the
+sel4 build directory. Performs the following steps:
+1. Empties build directory.
+2. Runs `init-build.sh` located at sel4 root dir with flags for compiling on the
+   ZCU102 board and with clang instead of gcc. The script generates the ninja
+   build files based on cmake.
+3. Runs `ninja` to build the project.
+
+## llvmpass-compile.sh
+Automates the compilation and build process of the llvm pass. Must run from
+within the sel4 build directory. Performs the following steps:
+1. Sets the `LLVM_DIR` variable to llvm-15 binaries.
+2. Empties the build directory.
+3. Runs cmake with the `LT_LLVM_INSTALL_DIR` flag pointing to `LLVM_DIR` and
+   path to the `myLlvmPass` directory where the source files are located.
