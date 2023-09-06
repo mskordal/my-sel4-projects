@@ -10,6 +10,11 @@ include(settings.cmake)
 
 project(mapping C ASM)
 
+# Kernel configuration variables
+# sets EXPORT_PMU_USER: true which enables PMU usage on userspace. This allows
+# the usage of performance counters
+set(KernelArmExportPMUUser ON CACHE BOOL "" FORCE) 
+
 find_package(seL4 REQUIRED)
 find_package(elfloader-tool REQUIRED)
 find_package(musllibc REQUIRED)
@@ -43,10 +48,10 @@ add_executable(vkamapping archive.o src/main.c)
 # Include the pass in the main elf file
 target_compile_options(vkamapping PRIVATE -O0 -fpass-plugin=/home/mskordal/workspace/myRepos/my-sel4-projects/llvmpassbuild/libInjectBRAM.so)
 
-target_link_libraries(vkamapping
+target_link_libraries(vkamapping 
 	sel4 muslc utils sel4muslcsys
 	sel4platsupport sel4utils sel4debug
-	sel4allocman)
+	sel4allocman sel4bench )
 
 
 include(rootserver)

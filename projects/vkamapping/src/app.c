@@ -13,18 +13,18 @@ int main(int argc, char **argv)
 {
 	int x = 0;
 
-	printf("process_2: hey hey hey\n");
+	// printf("process_2: hey hey hey\n");
 
-	func1();
+	// func1();
 	x = x + 1;
 
-	func2();
+	// func2();
 	x = x + 2;
 
-	func3();
+	// func3();
 	x = x + 3;
 
-	printf("x: %d\n", x);
+	// printf("x: %d\n", x);
 	/*while(1);*/
 
 	return 0;
