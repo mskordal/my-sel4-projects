@@ -3,7 +3,15 @@ This directory contains the source files required to build a hardware IP on
 Vitis HLS. The IP is used on ZCU102 in conjuction with the SeL4 application and
 the LLVM pass.
 
-# Current version
+# version 4 (current)
+Works similarly to version 3 but with a few minor differences:
+- Function paremeters for cpu cycles and events are divided to 2 32bits now.
+- stack functions are now simplified and implemented inline with the main code.
+- function level location in the NodeDataMS slot, has been moved from the MS
+  byte to the LS byte to allow the hardware and the pass to avoid some bit shift
+  operations.
+
+# version 3
 The IP now stores information about a function that is called additionally to
 assembling a call graph. It receives a total of 8 64bit parameters split into
 16 32bits. Here they will be described as 8 64bits. Those are:
@@ -18,9 +26,11 @@ assembling a call graph. It receives a total of 8 64bit parameters split into
    - byte 7: Function level in the call stack
 - cpyCycles (parameter 1): The number of CPU cycles gathered while this 
   function was running.
-- event 0 - 5 (Parameters 2 - 7): The number of triggers that happened for each 
+- event 0 - 5 (Parameters 2 - 7): The number of triggers that happened for each
   corresponding event while this function was running.
-The IP is triggered in two different occasions and in each occasion it uses different parameters. The 2 occasions are explained below:
+  
+The IP is triggered in two different occasions and in each occasion it uses
+different parameters. The 2 occasions are explained below:
 1. When a function is called The pass writes in NodeData the Function and event
    ID for each byte. Function level is ignored as this is determined in the
    hardware. All other parameters are ignored in this case. The hardware stores
@@ -34,7 +44,7 @@ The IP is triggered in two different occasions and in each occasion it uses diff
    nodeData of this function is located and fills the rest of the bytes with the
    cpu cycles and event information.
 
-# Previous version 2
+# version 2
 The IP receives 2 values from the software application. An index and a hardware
 address that corresponds to the BRAM, where the IP writes.
 BRAM is split to 2 parts.
@@ -48,7 +58,7 @@ BRAM is split to 2 parts.
    pushed in the stack. When ID==0 arrives, the stack is popped indicating that
    a function has just returned.
 
-# Previous version 1
+# version 1
 The IP receives 2 values from the software application. An index and a hardware
 address that corresponds to the BRAM. When starting the IP through the control
 register, the IP will increment a specific location in BRAM based on the index

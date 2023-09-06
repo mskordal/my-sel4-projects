@@ -1,6 +1,5 @@
 #include <ap_int.h>
 
-#include "stack.h"
 #include "attester_types.h"
 
 #define CALL_GRAPH_OFFSET 0
@@ -36,19 +35,28 @@
 #define GRAPH_INDEX_NEXT 16
 
 
-void attester_top_func(ap_uint<64> nodeData, ap_uint<64> cpuCycles,
-	ap_uint<64> event0, ap_uint<64> event1, ap_uint<64> event2,
-	ap_uint<64> event3, ap_uint<64> event4, ap_uint<64> event5,
+void attester_top_func( ap_uint<32> nodeDataLs, ap_uint<32> nodeDataMs,
+	ap_uint<32> cpuCyclesLs, ap_uint<32> cpuCyclesMs,
+	ap_uint<32> event0Ls, ap_uint<32> event0Ms, ap_uint<32> event1Ls, ap_uint<32> event1Ms, ap_uint<32> event2Ls, ap_uint<32> event2Ms,
+	ap_uint<32> event3Ls, ap_uint<32> event3Ms, ap_uint<32> event4Ls, ap_uint<32> event4Ms, ap_uint<32> event5Ls, ap_uint<32> event5Ms,
 	ap_uint<8>* bram)
 {
-#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=nodeData
-#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=cpuCycles
-#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event0
-#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event1
-#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event2
-#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event3
-#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event4
-#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event5
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=nodeDataLs
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=cpuCyclesLs
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=nodeDataMs
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=cpuCyclesMs
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event0Ls
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event1Ls
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event2Ls
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event3Ls
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event4Ls
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event5Ls
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event0Ms
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event1Ms
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event2Ms
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event3Ms
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event4Ms
+#pragma HLS INTERFACE mode=s_axilite bundle=BUS_A port=event5Ms
 #pragma HLS INTERFACE m_axi port=bram bundle=BUS_B
 #pragma HLS INTERFACE s_axilite port=return bundle=BUS_A
 
@@ -65,66 +73,49 @@ void attester_top_func(ap_uint<64> nodeData, ap_uint<64> cpuCycles,
 
 	// In the function start, we store the ID of function and events and set the
 	// function level based on parent.
-	if((nodeData & FUNC_ID_MASK) )
+	if(nodeDataLs != 0)
 	{
-		//parent_index = peek(stack, sp);
 		if (sp > 0)
 		{
 			parent_index = stack[sp-1];
+			nodeDataMs = call_graph[parent_index + NODE_DATA_MS_OFFSET] + 0x1;
 		}
 		else
 		{
-			parent_index = -1;
+			nodeDataMs = nodeDataMs | 0x1;
 		}
-		if(parent_index == -1)
-		{
-			nodeData |= 0x100000000000000;
-		}
-		else //get level from parent, add + 1 a
-		{
-			nodeData |=  ((ap_uint<64>)(((call_graph[parent_index + NODE_DATA_MS_OFFSET] & LEVEL_MASK) + 0x1000000)) << 32);
-		}
-		call_graph[graph_index + NODE_DATA_LS_OFFSET] = nodeData;
-		call_graph[graph_index + NODE_DATA_MS_OFFSET] = nodeData >> 32;
+		call_graph[graph_index + NODE_DATA_LS_OFFSET] = nodeDataLs;
+		call_graph[graph_index + NODE_DATA_MS_OFFSET] = nodeDataMs;
 
-		//push(graph_index, stack, sp);
 		stack[sp] = graph_index;
-		++sp;
+		sp = sp + 1;
 
 		graph_index = graph_index + GRAPH_INDEX_NEXT;
 	}
 	else
 	{
-		// In the function end, we store the event values.
-		//parent_index = pop(stack, sp);
-		if (sp > 0)
-		{
-			--sp;
-			parent_index = stack[sp];
-		}
-		else
-		{
-			parent_index = -1;
-		}
-		call_graph[parent_index + NODE_CYCLES_LS_OFFSET] = cpuCycles;
-		call_graph[parent_index + NODE_CYCLES_MS_OFFSET] = cpuCycles >> 32;
+		sp = sp - 1;
+		parent_index = stack[sp];
 
-		call_graph[parent_index + NODE_EVENT0_LS_OFFSET] = event0;
-		call_graph[parent_index + NODE_EVENT0_MS_OFFSET] = event0 >> 32;
+		call_graph[parent_index + NODE_CYCLES_LS_OFFSET] = cpuCyclesLs;
+		call_graph[parent_index + NODE_CYCLES_MS_OFFSET] = cpuCyclesMs;
 
-		call_graph[parent_index + NODE_EVENT1_LS_OFFSET] = event1;
-		call_graph[parent_index + NODE_EVENT1_MS_OFFSET] = event1 >> 32;
+		call_graph[parent_index + NODE_EVENT0_LS_OFFSET] = event0Ls;
+		call_graph[parent_index + NODE_EVENT0_MS_OFFSET] = event0Ms;
 
-		call_graph[parent_index + NODE_EVENT2_LS_OFFSET] = event2;
-		call_graph[parent_index + NODE_EVENT2_MS_OFFSET] = event2 >> 32;
+		call_graph[parent_index + NODE_EVENT1_LS_OFFSET] = event1Ls;
+		call_graph[parent_index + NODE_EVENT1_MS_OFFSET] = event1Ms;
 
-		call_graph[parent_index + NODE_EVENT3_LS_OFFSET] = event3;
-		call_graph[parent_index + NODE_EVENT3_MS_OFFSET] = event3 >> 32;
+		call_graph[parent_index + NODE_EVENT2_LS_OFFSET] = event2Ls;
+		call_graph[parent_index + NODE_EVENT2_MS_OFFSET] = event2Ms;
 
-		call_graph[parent_index + NODE_EVENT4_LS_OFFSET] = event4;
-		call_graph[parent_index + NODE_EVENT4_MS_OFFSET] = event4 >> 32;
+		call_graph[parent_index + NODE_EVENT3_LS_OFFSET] = event3Ls;
+		call_graph[parent_index + NODE_EVENT3_MS_OFFSET] = event3Ms;
 
-		call_graph[parent_index + NODE_EVENT5_LS_OFFSET] = event5;
-		call_graph[parent_index + NODE_EVENT5_MS_OFFSET] = event5 >> 32;
+		call_graph[parent_index + NODE_EVENT4_LS_OFFSET] = event4Ls;
+		call_graph[parent_index + NODE_EVENT4_MS_OFFSET] = event4Ms;
+
+		call_graph[parent_index + NODE_EVENT5_LS_OFFSET] = event5Ls;
+		call_graph[parent_index + NODE_EVENT5_MS_OFFSET] = event5Ms;
 	}
 }
