@@ -34,3 +34,6 @@ llvmpassbuild/
 *.bak
 *.pdf
 *.ila
+
+#
+mskordal-backup*
