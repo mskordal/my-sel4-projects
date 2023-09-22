@@ -1,0 +1,72 @@
+diff --git a/libsel4bench/arch_include/arm/armv/armv8-a/sel4bench/armv/sel4bench.h b/libsel4bench/arch_include/arm/armv/armv8-a/sel4bench/armv/sel4bench.h
+index f438b9a..f14d566 100644
+--- a/libsel4bench/arch_include/arm/armv/armv8-a/sel4bench/armv/sel4bench.h
++++ b/libsel4bench/arch_include/arm/armv/armv8-a/sel4bench/armv/sel4bench.h
+@@ -1,3 +1,14 @@
++/**
++ * MSKORDAL edit: Removed static FASTFN macro that makes several functions inline. That
++ * way we can call them through the pass
++ * sel4bench_init
++ * sel4bench_get_cycle_count
++ * sel4bench_get_counter
++ * sel4bench_set_count_event
++ * sel4bench_start_counters
++ * sel4bench_reset_counters
++*/
++
+ /*
+  * Copyright 2017, Data61, CSIRO (ABN 41 687 119 230)
+  *
+@@ -27,7 +38,7 @@
+  */
+ void seL4_DebugRun(void (* userfn)(void *), void *userarg);
+ 
+-static FASTFN void sel4bench_init()
++void sel4bench_init()
+ {
+     //do kernel-mode PMC init
+ #ifndef CONFIG_EXPORT_PMU_USER
+@@ -74,7 +85,7 @@ static FASTFN seL4_Word sel4bench_get_num_counters()
+     return SEL4BENCH_ARMV8A_PMCR_N(sel4bench_private_read_pmcr());
+ }
+ 
+-static FASTFN ccnt_t sel4bench_get_cycle_count()
++ccnt_t sel4bench_get_cycle_count()
+ {
+     ccnt_t val;
+     SEL4BENCH_READ_CCNT(val); //read its value
+@@ -85,7 +96,7 @@ static FASTFN ccnt_t sel4bench_get_cycle_count()
+  * think it's worthwhile in the general case, for performance reasons.
+  * moreover, it's small enough that it'll be suitably aligned most of the time
+  */
+-static FASTFN ccnt_t sel4bench_get_counter(counter_t counter)
++ccnt_t sel4bench_get_counter(counter_t counter)
+ {
+     sel4bench_private_write_pmnxsel(counter); //select the counter on the PMU
+ 
+@@ -131,14 +142,14 @@ static CACHESENSFN ccnt_t sel4bench_get_counters(counter_bitfield_t mask, ccnt_t
+     return ccnt;
+ }
+ 
+-static FASTFN void sel4bench_set_count_event(counter_t counter, event_id_t event)
++void sel4bench_set_count_event(counter_t counter, event_id_t event)
+ {
+     sel4bench_private_write_pmnxsel(counter); //select counter
+     sel4bench_private_write_pmcnt(0); //reset it
+     return sel4bench_private_write_evtsel(event); //change the event
+ }
+ 
+-static FASTFN void sel4bench_start_counters(counter_bitfield_t mask)
++void sel4bench_start_counters(counter_bitfield_t mask)
+ {
+     /* conveniently, ARM performance counters work exactly like this,
+      * so we just write the value directly to COUNTER_ENABLE_SET
+@@ -155,7 +166,7 @@ static FASTFN void sel4bench_stop_counters(counter_bitfield_t mask)
+     return sel4bench_private_write_cntenc(mask & ~BIT(SEL4BENCH_ARMV8A_COUNTER_CCNT));
+ }
+ 
+-static FASTFN void sel4bench_reset_counters(void)
++void sel4bench_reset_counters(void)
+ {
+     //Reset all counters except the CCNT
+     MODIFY_PMCR( |, SEL4BENCH_ARMV8A_PMCR_RESET_ALL);

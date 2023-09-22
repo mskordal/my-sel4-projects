@@ -1,0 +1,28 @@
+diff --git a/libsel4bench/arch_include/arm/armv/armv8-a/sel4bench/armv/private.h b/libsel4bench/arch_include/arm/armv/armv8-a/sel4bench/armv/private.h
+index 29d006b..3c4d996 100644
+--- a/libsel4bench/arch_include/arm/armv/armv8-a/sel4bench/armv/private.h
++++ b/libsel4bench/arch_include/arm/armv/armv8-a/sel4bench/armv/private.h
+@@ -1,3 +1,9 @@
++/**
++ * MSKORDAL edit: Removed static FASTFN macro that makes several functions inline. That
++ * sel4bench_private_write_pmcr
++ * sel4bench_private_read_pmcr
++*/
++
+ /*
+  * Copyright 2017, Data61, CSIRO (ABN 41 687 119 230)
+  *
+@@ -86,11 +92,11 @@ static inline void sel4bench_private_deinit(void* data)
+ #define SEL4BENCH_ARMV8A_PMCR_RESET_CCNT BIT(2)
+ #define SEL4BENCH_ARMV8A_PMCR_DIV64      BIT(3) /* Should CCNT be divided by 64? */
+ 
+-static FASTFN void sel4bench_private_write_pmcr(uint32_t val)
++void sel4bench_private_write_pmcr(uint32_t val)
+ {
+     PMU_WRITE(PMCR, val);
+ }
+-static FASTFN uint32_t sel4bench_private_read_pmcr(void)
++uint32_t sel4bench_private_read_pmcr(void)
+ {
+     uint32_t val;
+     PMU_READ(PMCR, val);

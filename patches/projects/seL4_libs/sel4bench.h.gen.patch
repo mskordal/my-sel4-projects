@@ -1,0 +1,57 @@
+diff --git a/libsel4bench/include/sel4bench/sel4bench.h b/libsel4bench/include/sel4bench/sel4bench.h
+index 6cb0ef9..be3543f 100644
+--- a/libsel4bench/include/sel4bench/sel4bench.h
++++ b/libsel4bench/include/sel4bench/sel4bench.h
+@@ -75,7 +75,7 @@ static_assert(ARRAY_SIZE(GENERIC_EVENTS) == ARRAY_SIZE(GENERIC_EVENT_NAMES),
+  * Starts the cycle counter, which is guaranteed to run until
+  * `sel4bench_destroy()` is called.
+  */
+-static UNUSED void sel4bench_init();
++void sel4bench_init();
+ 
+ /**
+  * Tear down the sel4bench library.  Nothing else is guaranteed to work, and may
+@@ -92,7 +92,7 @@ static UNUSED void sel4bench_destroy();
+  *
+  * @return current cycle count
+  */
+-static UNUSED ccnt_t sel4bench_get_cycle_count();
++ccnt_t sel4bench_get_cycle_count();
+ 
+ /**
+  * Query how many performance counters are supported on this CPU, excluding the
+@@ -123,7 +123,7 @@ const char *sel4bench_get_counter_description(counter_t counter);
+  *
+  * @return counter value
+  */
+-static UNUSED ccnt_t sel4bench_get_counter(counter_t counter);
++ccnt_t sel4bench_get_counter(counter_t counter);
+ 
+ /**
+  * Query the value of a set of counters.
+@@ -148,14 +148,14 @@ static UNUSED ccnt_t sel4bench_get_counters(counter_bitfield_t counters,
+  * @param counter counter to configure
+  * @param event   event to track
+  */
+-static UNUSED void sel4bench_set_count_event(counter_t counter, event_id_t id);
++void sel4bench_set_count_event(counter_t counter, event_id_t id);
+ 
+ /**
+  * Start counting events on a set of performance counters.
+  *
+  * @param counters bitfield indicating which counter(s) to start
+  */
+-static UNUSED void sel4bench_start_counters(counter_bitfield_t counters);
++void sel4bench_start_counters(counter_bitfield_t counters);
+ 
+ /**
+  * Stop counting events on a set of performance counters.
+@@ -171,7 +171,7 @@ static UNUSED void sel4bench_stop_counters(counter_bitfield_t counters);
+  * performance counter, and is not reset.
+  *
+  */
+-static UNUSED void sel4bench_reset_counters(void);
++void sel4bench_reset_counters(void);
+ 
+ /**
+  * Query the number of benchmark loops required to read a given number of
