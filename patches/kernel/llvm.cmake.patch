@@ -1,0 +1,16 @@
+diff --git a/llvm.cmake b/llvm.cmake
+index 8286896c5..dc6770207 100644
+--- a/llvm.cmake
++++ b/llvm.cmake
+@@ -37,8 +37,9 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+ mark_as_advanced(FORCE CMAKE_TOOLCHAIN_FILE)
+ 
+ find_program(CCACHE ccache)
++set(CCACHE CCACHE-NOTFOUND)
+ if(NOT ("${CCACHE}" STREQUAL CCACHE-NOTFOUND))
+-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE})
+-    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE})
++	set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE})
++	set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE})
+ endif()
+ mark_as_advanced(CCACHE)

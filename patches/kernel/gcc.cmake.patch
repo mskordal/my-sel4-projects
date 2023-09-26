@@ -1,0 +1,24 @@
+diff --git a/gcc.cmake b/gcc.cmake
+index 81fc22a8e..03e059ff8 100644
+--- a/gcc.cmake
++++ b/gcc.cmake
+@@ -132,12 +132,13 @@ mark_as_advanced(FORCE CMAKE_TOOLCHAIN_FILE)
+ # Invoke compiler via ccache. This has no effect if ccache cannot be found.
+ # Projects can override this effect by resetting the RULE_LAUNCH_COMPILE and
+ # RULE_LAUNCH_LINK properties.
+-find_program(CCACHE ccache)
+-if(NOT ("${CCACHE}" STREQUAL CCACHE-NOTFOUND))
+-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE})
+-    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE})
+-endif()
+-mark_as_advanced(CCACHE)
++# MSKORDAL: Commented ccache invocation
++# find_program(CCACHE ccache)
++# if(NOT ("${CCACHE}" STREQUAL CCACHE-NOTFOUND))
++#     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE})
++#     set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE})
++# endif()
++# mark_as_advanced(CCACHE)
+ 
+ # GCC color options:
+ # Ninja and ccache cause gcc to not emit colored output when -fdiagnostics-color=auto.
