@@ -1,10 +1,10 @@
 # root directory SeL4 default files/directories
-init-build.sh
+/init-build.sh
 /easy-settings.cmake
-.sel4_cache/
-kernel/
-sel4build/
-tools/
+/.sel4_cache/
+/kernel/
+/sel4build/
+/tools/
 
 # tags file
 tags
@@ -15,7 +15,7 @@ projects/seL4_libs/
 projects/util_libs/
 projects/sel4runtime/
 
-#mspoc files
+# mspoc files
 *.elf
 vivado*
 .Xil/
@@ -25,14 +25,14 @@ llvmpassbuild/
 *.ll
 *.so
 
-#vscode files and directories
+# vscode files and directories
 .vscode
 
-#misc extensions
+# misc extensions
 *.out
 *.bak
 *.pdf
 *.ila
 
-#
+# directories that can be created to store files that we dont want to push
 mskordal-backup*
