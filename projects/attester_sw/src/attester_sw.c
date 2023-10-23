@@ -79,11 +79,6 @@ void attester_top_func( seL4_Uint32 nodeDataLs, seL4_Uint32 nodeDataMs,
 		sp = sp - 1;
 		parent_index = stack[sp];
 
-		printf(	"adding for:\n\tc:%u-%u\n\te0:%u,%u\n\te1:%u-%u\n\te2:%u-%u\n\t" 
-				"e3:%u-%u\n\te4:%u-%u\n\te5:%u-%u\n", cpuCyclesMs, cpuCyclesLs,
-				event0Ms, event0Ls, event1Ms, event1Ls, event2Ms, event2Ls,
-				event3Ms, event3Ls, event4Ms, event4Ls, event5Ms, event5Ls);
-
 		call_graph[parent_index + NODE_CYCLES_LS_OFFSET] = cpuCyclesLs;
 		call_graph[parent_index + NODE_CYCLES_MS_OFFSET] = cpuCyclesMs;
 
