@@ -32,6 +32,8 @@ All files required to build the LLVM Pass, reside in
   HLS IP. It is used to translate it with clang to IR code, and then implement
   those IR instructions in the pass for injection.
 
+- **prof-func-list.md**: Contains presets of functions and IDs to quickly copy
+  them to `functions.txt` depending on which application is being profiled.
 
 # Build and run
 
@@ -62,45 +64,67 @@ $LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram -disa
 $LLVM_DIR/bin/clang -O0 -fpass-plugin=./libInjectBRAM.so -g ../myLlvmPass/app.c -o app
 
 ```
-# Version 6 (current)
-The pass now not only creates a call graph of the functions that are called but
-also enables and starts the performance counters of the PMU. When a function
-terminates, the results of 6 events selected and the cpu cycles are sent over to
-the call graph. The pass operates on 2 modes. On the first mode, the pass
-injects instruction for writing to the HLS IP while on the second mode, it
-injects calls to the software implementation of the HLS IP. By
-uncommenting/commenting `#define USE_HLS` on can switch between those 2 modes.
-There is also a define `DEBUG_PRINT`. This enables the injection of printfs with
-desired data in the program for debugging.
+# Pass functionality. Current version: 1.6
+The pass profiles a set of functions on user-specified events, using the
+hardware performance counters of the PMU results are stored as a conceptual
+format of a call-graph. The results of 6 events and cpu cycles are stored in
+each node of the call graph which represents a call instance of a profiling
+function. The pass operates on 2 modes. On the first mode, the pass injects
+instruction for writing to the HLS IP while on the second mode, it injects calls
+to the software implementation of the HLS IP. By uncommenting/commenting
+`#define USE_HLS` on can switch between those 2 modes. The define `DEBUG_PRINT`
+enables the injection of printfs with desired data in the program at runtime for
+debugging using the `insertPrint` function. The define `DEBUG_COMP_PRINT`
+enables the output of debug messages at pass injection during the compilation of
+an application using the `debug_errs` macro.
 
 a53 cores which run on ZCU102 support up to 6 simultaneous events to count plus
 CPU cycles. To choose the appropriate events, look over the list of events set
-as defines and then switch the defines `EVENT_0` to `EVENT_5` according to the
-events you want to measure. CPU cycle counting is always active.
+as defines, and then switch the defines `EVENT_0` to `EVENT_5` according to the
+events you want to measure. CPU cycle counting is always active. The functions
+that will be profiled are read from the `functions.txt` file. Each line in the
+file must contain a function name followed by a unique integer id 1-255
+separated by space. Check `prof-func-list.md` for examples.
 
-The pass performs the following actions to the application:
-1. In the beginning of the main function it adds calls to the performance
-   counters initialization.
-2. Then for every function listed in `functions.txt`, in the beginning it will
-   create local variables, and will send the function ID and event IDs to the
-   HLS. If `USE_HLS` is set, the pass will also spin on the idle bit of the
-   hardware to make sure multiple writes will not overlap and corrupt the data.
-   After that, it injects calls that resets the counters to start counting from
-   the beginnig of the function.
-3. In the body of those functions and main, the pass searches for calls to those
-   same functions. Before each call instruction, the pass stores the current
-   event values since when the function will be called, the counters will be
-   reset. Then right after the call, the pass loads the global variable values
-   that held the callee's values to add them to the local function's values and
-   also send those global values to HLS to store the event counts for that
-   callee.
-4. Before the return instruction of every function, the pass stores current
-   event counts to the global variables.
-5. For the software HLS mode, the pass also injects the call graph print before
-   the return of main.
+## The pass performs the following actions to the application:
+1. At global scope, it defines a global pointer set to the virtual address
+   mapped to the HLS hardware and 7 global variables used to pass event counts
+   from profiled callees to profiled callers. Note that for now, The application
+   needs to map the HLS hardware on that same virtual address as the one that
+   the pass uses. the Pass also creates function declarations of functions that
+   are not initially visible by the application module, but the pass requires
+   them to inject call instructions to those functions.
+2. In the beginning of the main function it initializes the performance counters
+   and sets them to specified `EVENT_0` to `EVENT_5` events.
+The next steps apply for every function listed in `functions.txt`:
+1. In the function prologue it defines local variables, and writes the function
+   ID and event IDs to the HLS. If `USE_HLS` is set, the pass spins on the idle
+   bit of the hardware to make sure multiple writes will not overlap and corrupt
+   the data. It then resets the counters to start counting from the beginnig of
+   the function.
+3. In the body of each function, the pass searches for calls to those same
+   functions. Before each call instruction, the pass stores the current event
+   values since when the callee will be called, the counters will be reset. Then
+   right after the call, the pass adds the callee's results to the currently
+   stored values of the caller and resets the counters to resume execution.
+4. In the function epilogue, the pass writes current event counts to the HLS
+   hardware and saves the values to be passed to the function's caller as well.
+5. For the software HLS mode, the pass prints the call graph in a csv format at
+   epilogue of main.
 
-# Version 5
-The pass inject instructions to a source file. at the prologue of each function
+# Version 1.6 changes
+1. The function `makeExternalDeclarations` is implemented. It automatically
+   checks which functions that are going to be called by the pass are visible by
+   the module. For those that are not, it creates external declerations to them
+   so they can be injected at compile-time before linkining with objects that
+   containt the function bodies.
+2. Instead of writing event results of a function after it has returned, the
+   results are written to hardware before return. This solves the issue where we
+   needed to keep track of all the callers of the profiling functions, even if
+   the callers were not supposed to be profiled.
+
+# Version 1.5
+The pass injects instructions to a source file at the prologue of each function
 and after a function has returned. These instructions write to the HLS IP either
 the function ID being called during the prologue or 0 to notify that a function
 just returned. In particular, the pass performs the following steps:
@@ -131,7 +155,7 @@ just returned. In particular, the pass performs the following steps:
    previous sequence of functions up to `addTerminatorsToBlocks`, in order to
    send to the HLS IP notice, that a function has just returned.
 
-# Version 4
+# Version 1.4
 A global variable is created with a virtual address mapped on the physical
 address of the HLS design (must be mapped from within the app). The pass adds a
 code sequence on the prologue of each function and after every function call.
@@ -144,17 +168,17 @@ The sequence consists of 3 parts
    to 1 the control bit of the control signals of the HLS which is supposed
    to send the data across. It is not tested yet
 
-# Version 3
+# Version 1.3
 In main function, the address of the global is loaded to a local pointer, and
 the then the constant value '1' is written to the address pointed by the local
 pointer. This will cause a segmentation when run locally, since there is
 nothing at that address.
 
-# Version 2
+# Version 1.2
 Switched Function pass to a module pass. The pass creates a global pointer
 variable and assigns the address `0xa0010000` to it.
 
-# Version 1
+# Version 1.1
 The Pass just prints the non-external functions that are being called
 in the programme.
 
