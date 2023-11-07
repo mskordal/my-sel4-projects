@@ -40,8 +40,8 @@
 
 seL4_Uint16 sp = 0;
 seL4_Uint16 graph_index = 0;
-seL4_Uint16 stack[16];
-seL4_Uint32 call_graph[2048];
+seL4_Uint16 stack[1024];
+seL4_Uint32 call_graph[32768];
 
 
 void attester_top_func( seL4_Uint32 nodeDataLs, seL4_Uint32 nodeDataMs,
@@ -107,9 +107,25 @@ void attester_print(void)
 	seL4_Uint16 i, j, fid, flvl;
 	seL4_Uint64 cpuCycles, event0, event1, event2, event3, event4, event5;
 
+	printf
+	(
+		"Printing call graph raw format\n"
+		"------------------------------\n\n"
+	);
+	for ( i = 0; i < graph_index; ++i)
+	{
+		printf("%p: 0x%x\n", &call_graph[i], call_graph[i]);
+	}
+	printf("\n");
+
+	printf
+	(
+		"Printing call graph in csv format\n"
+		"---------------------------------\n\n"
+	);
 	printf(	"function-id,function-lvl,cpu-cycles,event-0,event-1,event-2,"
 			"event-3,event-4,event-5\n");
-
+	
 	for ( i = 0; i < graph_index; i += GRAPH_INDEX_NEXT)
 	{
 		fid = call_graph[i+NODE_DATA_LS_OFFSET] & 0xff;
