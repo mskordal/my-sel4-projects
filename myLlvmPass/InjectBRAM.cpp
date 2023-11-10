@@ -8,6 +8,8 @@
 #include <iostream> //TODO: for debugging. Remove later
 #include <fstream>	//to read files with function names
 #include <string>
+#include <filesystem>
+
 
 using namespace llvm;
 
@@ -84,19 +86,19 @@ using namespace llvm;
 
 /**@{*/
 /** Configure which events to be used here */
-// #define EVENT_0 EVENT_CACHE_L1D_MISS
-// #define EVENT_1 EVENT_CACHE_L1D_HIT
-// #define EVENT_2 EVENT_TLB_L1D_MISS
-// #define EVENT_3 EVENT_MEMORY_READ
-// #define EVENT_4 EVENT_MEMORY_WRITE
-// #define EVENT_5 EVENT_BRANCH_MISPREDICT
-
 #define EVENT_0 EVENT_CACHE_L1D_MISS
-#define EVENT_1 EVENT_CACHE_L1I_MISS
+#define EVENT_1 EVENT_CACHE_L1D_HIT
 #define EVENT_2 EVENT_TLB_L1D_MISS
-#define EVENT_3 EVENT_TLB_L1I_MISS
-#define EVENT_4 EVENT_L2D_CACHE_REFILL
-#define EVENT_5 EVENT_L2D_CACHE_WB
+#define EVENT_3 EVENT_MEMORY_READ
+#define EVENT_4 EVENT_MEMORY_WRITE
+#define EVENT_5 EVENT_BRANCH_MISPREDICT
+
+// #define EVENT_0 EVENT_CACHE_L1D_MISS
+// #define EVENT_1 EVENT_CACHE_L1I_MISS
+// #define EVENT_2 EVENT_TLB_L1D_MISS
+// #define EVENT_3 EVENT_TLB_L1I_MISS
+// #define EVENT_4 EVENT_L2D_CACHE_REFILL
+// #define EVENT_5 EVENT_L2D_CACHE_WB
 /**@}*/
 
 
@@ -232,9 +234,13 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 	
 	Type *Int64PtrTy = Type::getInt64PtrTy(context);
 
+	std::string fullPathFilename = M.getName().str();
+	std::string filename = std::filesystem::path(fullPathFilename).filename().
+		replace_extension("").string();
+	debug_errs("filename of Module: " << filename << "\n");
 	// Create a global ptr var with external linkage and a null initializer.
 	hlsAddrVar = new GlobalVariable(M, Int64PtrTy, false,
-		GlobalValue::ExternalLinkage, nullptr, "bramptr");
+		GlobalValue::ExternalLinkage, nullptr, filename + "-hlsptr");
 	// Create a constant 64-bit integer value.
 	// APInt is an object that represents an integer of specified bitwidth
 	ConstantInt *Int64Val = ConstantInt::get(context, APInt(64, HLS_VIRT_ADDR));
@@ -250,7 +256,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 	{
 		globalEventVars[i] = new GlobalVariable(M, Type::getInt64Ty(context),
 			false, GlobalValue::ExternalLinkage, nullptr,
-			"event" + std::to_string(i));
+			filename + "-ev" + std::to_string(i));
 		globalEventVars[i]->setDSOLocal(true);
 		globalEventVars[i]->setAlignment(Align(8));
 		globalEventVars[i]->setInitializer(
@@ -259,36 +265,43 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 
 	Function *mainFunc = M.getFunction("main");
 
-	BasicBlock *mainFirstBblk = &mainFunc->getEntryBlock();
+	if(mainFunc)
+	{
+		BasicBlock *mainFirstBblk = &mainFunc->getEntryBlock();
 
-	IRBuilder<> mainBuilder(mainFirstBblk, mainFirstBblk->begin());
+		IRBuilder<> mainBuilder(mainFirstBblk, mainFirstBblk->begin());
 
 #ifdef DEBUG_PRINT
-	insertPrint(mainBuilder, "HLS virt address: ", Int64Val,
-		*mainFirstBblk->getModule());
+		insertPrint(mainBuilder, "HLS virt address: ", Int64Val,
+			*mainFirstBblk->getModule());
 #endif
 
-	mainBuilder.CreateCall(declareFuncs[sel4BenchInitFunc]);
+		mainBuilder.CreateCall(declareFuncs[sel4BenchInitFunc]);
 
-	// Create 6 call instructions to sel4bench_set_count_event
-	for (int i = 0; i < 6; ++i)
-	{
-		Value *s4bsceArgs[2] =
+		// Create 6 call instructions to sel4bench_set_count_event
+		for (int i = 0; i < 6; ++i)
 		{
-			ConstantInt::get(context, APInt(64, i)),
-			ConstantInt::get(context, APInt(64, eventIDs[i]))
-		};
-		mainBuilder.CreateCall(declareFuncs[sel4BenchSetCountEventFunc],
-			s4bsceArgs);
+			Value *s4bsceArgs[2] =
+			{
+				ConstantInt::get(context, APInt(64, i)),
+				ConstantInt::get(context, APInt(64, eventIDs[i]))
+			};
+			mainBuilder.CreateCall(declareFuncs[sel4BenchSetCountEventFunc],
+				s4bsceArgs);
+		}
+		debug_errs("main prologue instrumentation done!!");
 	}
-	debug_errs("main prologue instrumentation done!!");
-
+	else
+		debug_errs("This module has no main!");
 	for (int i = 0; i < funcNames.size(); ++i)
 	{
 		Value *idleOff;
 
 		// get function the function
 		Function *func = M.getFunction(funcNames.at(i));
+
+		if(!func) continue;
+		if(func->empty()) continue;
 
 		BasicBlock *firstBblk = &func->getEntryBlock();
 
@@ -356,26 +369,28 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 	}
 
 
-// If we are on software mode, print results to console
+	if(mainFunc)
+	{
+	// If we are on software mode, print results to console
 #ifndef USE_HLS
 #ifdef USE_SEL4BENCH
-	std::vector<Instruction *> retInsts = getTermInst(mainFunc);
+		std::vector<Instruction *> retInsts = getTermInst(mainFunc);
 #else
-	std::vector<Instruction *> retInsts = getReturnInsts(mainFunc);
+		std::vector<Instruction *> retInsts = getReturnInsts(mainFunc);
 #endif
-	for (Instruction *instr : retInsts)
-	{
-		BasicBlock *bblk = instr->getParent();
-		Instruction *firstInstr = bblk->getFirstNonPHI();
-		if (firstInstr != instr)
-			bblk = SplitBlock(bblk, instr);
-		
-		IRBuilder<> endBuilder(bblk, bblk->begin());
-		endBuilder.CreateCall(declareFuncs[attesterPrintFunc]);
+		for (Instruction *instr : retInsts)
+		{
+			BasicBlock *bblk = instr->getParent();
+			Instruction *firstInstr = bblk->getFirstNonPHI();
+			if (firstInstr != instr)
+				bblk = SplitBlock(bblk, instr);
+			
+			IRBuilder<> endBuilder(bblk, bblk->begin());
+			endBuilder.CreateCall(declareFuncs[attesterPrintFunc]);
+		}
+		debug_errs(declareFuncNames[attesterPrintFunc] << " instrumentation done!!");
+#endif
 	}
-	debug_errs(declareFuncNames[attesterPrintFunc] << " instrumentation done!!");
-
-#endif
 
 	return llvm::PreservedAnalyses::all();
 }

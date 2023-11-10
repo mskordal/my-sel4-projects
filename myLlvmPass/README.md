@@ -64,7 +64,7 @@ $LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram -disa
 $LLVM_DIR/bin/clang -O0 -fpass-plugin=./libInjectBRAM.so -g ../myLlvmPass/app.c -o app
 
 ```
-# Pass functionality. Current version: 1.6
+# Pass functionality. Current version: 1.7
 The pass profiles a set of functions on user-specified events, using the
 hardware performance counters of the PMU results are stored as a conceptual
 format of a call-graph. The results of 6 events and cpu cycles are stored in
@@ -111,6 +111,11 @@ The next steps apply for every function listed in `functions.txt`:
    hardware and saves the values to be passed to the function's caller as well.
 5. For the software HLS mode, the pass prints the call graph in a csv format at
    epilogue of main.
+
+# Version 1.6 changes
+Pass works on multiple files that can be profiled. For each file, unique
+pointers and globals are created. Fixed an issue where the pass would search for
+main function in every file causing stack dump.
 
 # Version 1.6 changes
 1. The function `makeExternalDeclarations` is implemented. It automatically

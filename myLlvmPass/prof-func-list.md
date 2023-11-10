@@ -39,3 +39,27 @@ ipc_recv_func 11
 
 ## page-mapping
 bench_proc 2
+
+## embench
+mont64_body 2
+crc_32_body 3
+basicmath_small_body 4
+libedn_body 5
+libhuffbench_body 6
+matmult_int_body 7
+md5_body 8
+libminver_body 9
+nbody_body 10
+nettle_aes_body 11
+nettle_sha256_body 12
+libsichneu_body 13
+libpicojpeg_test_body 14
+primecount_body 15
+qrtest_body 16
+combined_body 17
+libslre_body 18
+libst_body 19
+libstatemate_body 20
+libud_body 21
+libwikisort_body 22
+tarfind_body 23
