@@ -64,7 +64,7 @@ $LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram -disa
 $LLVM_DIR/bin/clang -O0 -fpass-plugin=./libInjectBRAM.so -g ../myLlvmPass/app.c -o app
 
 ```
-# Pass functionality. Current version: 1.7
+# Pass functionality. Current version: 1.8
 The pass profiles a set of functions on user-specified events, using the
 hardware performance counters of the PMU results are stored as a conceptual
 format of a call-graph. The results of 6 events and cpu cycles are stored in
@@ -96,23 +96,35 @@ separated by space. Check `prof-func-list.md` for examples.
    them to inject call instructions to those functions.
 2. In the beginning of the main function it initializes the performance counters
    and sets them to specified `EVENT_0` to `EVENT_5` events.
+3. It defines a function called `fprof_prolog`. This function writes the
+   profiling function ID and event IDs to the HLS. If `USE_HLS` is set, the pass
+   spins on the idle bit of the hardware to make sure multiple writes will not
+   overlap and corrupt the data. It then resets the counters to start counting
+   from the beginnig of the function.
+4. It defines a function called `fprof_epilog`. This function takes the current
+   7 values of the local variables defined in the prologue. It reads the 6
+   counters and the cycle counter and adds each result with the corresponding
+   local variable and then assigns the sum to the corresponding global variable.
+   It then writes the global values to the HLS hardware.
 The next steps apply for every function listed in `functions.txt`:
-1. In the function prologue it defines local variables, and writes the function
-   ID and event IDs to the HLS. If `USE_HLS` is set, the pass spins on the idle
-   bit of the hardware to make sure multiple writes will not overlap and corrupt
-   the data. It then resets the counters to start counting from the beginnig of
-   the function.
-3. In the body of each function, the pass searches for calls to those same
+1. In the function prologue the pass defines 7 local variables that to store counted events and then calls `fprof_prolog`.
+2. In the body of each function, the pass searches for calls to those same
    functions. Before each call instruction, the pass stores the current event
    values since when the callee will be called, the counters will be reset. Then
    right after the call, the pass adds the callee's results to the currently
    stored values of the caller and resets the counters to resume execution.
-4. In the function epilogue, the pass writes current event counts to the HLS
-   hardware and saves the values to be passed to the function's caller as well.
-5. For the software HLS mode, the pass prints the call graph in a csv format at
+3. The pass then searchs for return instructions in the profiling function and
+   before each return instruction found, it injects a call to `fprof_epilog`.
+4. For the software HLS mode, the pass prints the call graph in a csv format at
    epilogue of main.
 
-# Version 1.6 changes
+# Version 1.8 changes
+Prologue and epilogue instructions are put into two defined functions
+`fprof_prolog` and `fprof_epilog`. During function prologue and epilogue the
+pass injects calls to those functions instead of dumping the same code again and
+again.
+
+# Version 1.7 changes
 Pass works on multiple files that can be profiled. For each file, unique
 pointers and globals are created. Fixed an issue where the pass would search for
 main function in every file causing stack dump.
