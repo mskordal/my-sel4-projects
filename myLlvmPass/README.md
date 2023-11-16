@@ -64,7 +64,7 @@ $LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram -disa
 $LLVM_DIR/bin/clang -O0 -fpass-plugin=./libInjectBRAM.so -g ../myLlvmPass/app.c -o app
 
 ```
-# Pass functionality. Current version: 1.8
+# Pass functionality. Current version: 1.8.5
 The pass profiles a set of functions on user-specified events, using the
 hardware performance counters of the PMU results are stored as a conceptual
 format of a call-graph. The results of 6 events and cpu cycles are stored in
@@ -107,7 +107,8 @@ separated by space. Check `prof-func-list.md` for examples.
    local variable and then assigns the sum to the corresponding global variable.
    It then writes the global values to the HLS hardware.
 The next steps apply for every function listed in `functions.txt`:
-1. In the function prologue the pass defines 7 local variables that to store counted events and then calls `fprof_prolog`.
+1. In the function prologue the pass defines 7 local variables that to store
+   counted events and then calls `fprof_prolog`.
 2. In the body of each function, the pass searches for calls to those same
    functions. Before each call instruction, the pass stores the current event
    values since when the callee will be called, the counters will be reset. Then
@@ -117,6 +118,11 @@ The next steps apply for every function listed in `functions.txt`:
    before each return instruction found, it injects a call to `fprof_epilog`.
 4. For the software HLS mode, the pass prints the call graph in a csv format at
    epilogue of main.
+
+# Version 1.8.5 changes
+Parts injected before and after call instructions are now implemented as
+functions as well. This does not appear to have a worse impact on Cache
+Instruction misses so we will probably revert back to 1.8
 
 # Version 1.8 changes
 Prologue and epilogue instructions are put into two defined functions

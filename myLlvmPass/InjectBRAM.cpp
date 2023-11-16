@@ -36,7 +36,7 @@ using namespace llvm;
  * Uncomment to compile the pass to be injected during compilaction with clang.
  * Comment to be injected during compilation with opt.
  */
-// #define SET_PASS_ON_CLANG
+#define SET_PASS_ON_CLANG
 
 /**@}*/
 
@@ -123,7 +123,9 @@ void readCountersBeforeCallBlock(BasicBlock *thisBblk, LLVMContext &context);
 std::vector<Instruction *> getCallInsts(std::vector<std::string> &funcNames,
 	Function *func);
 std::vector<Instruction *> getReturnInsts(Function *func);
-Function *createPrologueFunction(int funcID, Module &M, LLVMContext &context);
+Function *createPrologueFunction(Module &M, LLVMContext &context);
+Function* createBeforeCallFunction(Module &M, LLVMContext &context);
+Function* createAfterCallFunction(Module &M, LLVMContext &context);
 Function* createEpilogueFunction(Module &M, LLVMContext &context);
 void createExternalFunctionDeclarations(Module &M, LLVMContext &context);
 #ifdef DEBUG_PRINT
@@ -263,8 +265,10 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 		globalEventVars[i]->setInitializer(
 			ConstantInt::get(context, APInt(64, 0)));
 	}
-	Function* prologFunc = createPrologueFunction(0, M, context);
+	Function* prologFunc = createPrologueFunction(M, context);
 	Function* epilogFunc = createEpilogueFunction(M, context);
+	Function* beforeCallFunc = createBeforeCallFunction(M, context);
+	Function* afterCallFunc = createAfterCallFunction(M, context);
 
 	Function *mainFunc = M.getFunction("main");
 
@@ -305,11 +309,13 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 		if(!func) continue;
 		if(func->empty()) continue;
 
+		//PROLOGUE PART
 		BasicBlock *firstBblk = &func->getEntryBlock();
 
 		injectAtFuncEntryBlock(&func->getEntryBlock(), funcIds.at(i),
 			prologFunc, context);
 
+		//CALL PART
 		std::vector<Instruction *> callInsts = getCallInsts(funcNames, func);
 
 		// For every call instructions split blocks. In the end bblk is a block
@@ -317,19 +323,38 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 		// that bblk branches to at the end
 		for (Instruction *instr : callInsts)
 		{
-			BasicBlock *bblk = instr->getParent();
-			// Instruction *firstInstr = bblk->getFirstNonPHI();
-			// if (firstInstr != instr)
-			if (&(bblk->front()) != instr)
-				bblk = SplitBlock(bblk, instr);
+			Value *beforeCallFuncArgs[eventIndicesNum] =
+			{
+				localEventVars[cpuCyclesIndex],
+				localEventVars[event0Index],
+				localEventVars[event1Index],
+				localEventVars[event2Index],
+				localEventVars[event3Index],
+				localEventVars[event4Index],
+				localEventVars[event5Index]
+			};
+			CallInst *beforeCallFuncCi = CallInst::Create(
+					beforeCallFunc->getFunctionType(), beforeCallFunc,
+						beforeCallFuncArgs, "");
+			beforeCallFuncCi->insertBefore(instr);
 
-			BasicBlock *nextBblk = SplitBlock(bblk,
-				instr->getNextNonDebugInstruction());
-
-			readCountersBeforeCallBlock(bblk, context);
-
-			addGlobalsToLocalsAfterCallBlock(nextBblk, context);
+			Value *afterCallFuncArgs[eventIndicesNum] =
+			{
+				localEventVars[cpuCyclesIndex],
+				localEventVars[event0Index],
+				localEventVars[event1Index],
+				localEventVars[event2Index],
+				localEventVars[event3Index],
+				localEventVars[event4Index],
+				localEventVars[event5Index]
+			};
+			CallInst *afterCallFuncCi = CallInst::Create(
+					afterCallFunc->getFunctionType(), afterCallFunc,
+						afterCallFuncArgs, "");
+			afterCallFuncCi->insertAfter(instr);
 		}
+
+		// EPILOGUE PART
 		std::vector<Instruction *> retInsts = getReturnInsts(func);
 		for (Instruction *instr : retInsts)
 		{
@@ -493,7 +518,7 @@ BasicBlock *createSpinLockOnIdleBitBlock(AllocaInst *ctrlSigVar, Function *func,
  * @return The block created
  */
 BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
-	LLVMContext &context, int id)
+	LLVMContext &context)
 {
 
 	int nodeDataLS;
@@ -1125,7 +1150,7 @@ std::vector<Instruction *> getTermInst(Function *func)
 }
 #endif
 
-Function* createPrologueFunction(int funcID, Module &M, LLVMContext &context)
+Function* createPrologueFunction(Module &M, LLVMContext &context)
 {
 	debug_errs(__func__<< ": Enter");
 	Value *idleOff;
@@ -1147,7 +1172,7 @@ Function* createPrologueFunction(int funcID, Module &M, LLVMContext &context)
 		prologFunc, context, &idleOff);
 
 	BasicBlock *idleBblk = writeFuncStartToHlsBlock(ctrlSigVar, prologFunc,
-		context, funcID);
+		context);
 
 	firstBblkBuilder.CreateBr(notIdleBblk);
 
@@ -1159,6 +1184,162 @@ Function* createPrologueFunction(int funcID, Module &M, LLVMContext &context)
 	debug_errs(__func__<< ": Exit");
 
 	return prologFunc;
+}
+Function* createBeforeCallFunction(Module &M, LLVMContext &context)
+{
+	debug_errs(__func__<< ": Enter");
+	Value *idleOff;
+
+	std::vector<Type*> funcParamsType
+	{
+		Type::getInt64PtrTy(context), // cpu cycles addr
+		Type::getInt64PtrTy(context), // event 0 addr
+		Type::getInt64PtrTy(context), // event 1 addr
+		Type::getInt64PtrTy(context), // event 2 addr
+		Type::getInt64PtrTy(context), // event 3 addr
+		Type::getInt64PtrTy(context), // event 4 addr
+		Type::getInt64PtrTy(context)  // event 5 addr
+	};
+	Type* funcRetType = Type::getVoidTy(context);
+	FunctionType* ft = FunctionType::get(funcRetType, funcParamsType, false);
+	Function* beforeCallFunc = Function::Create(ft, Function::ExternalLinkage,
+		"fprof_before_call", &M);
+	
+	BasicBlock *bblk = BasicBlock::Create(context, "", beforeCallFunc);
+	IRBuilder<> builder(bblk, bblk->begin());
+#ifdef DEBUG_PRINT
+	insertPrint(builder,  std::string(__func__) + " <<" + beforeCallFunc->getName().str()
+		+ ">>: START", nullptr, *bblk->getModule());
+#endif
+
+	CallInst *countEventVals[eventIndicesNum];
+	// Create call inst to sel4bench_get_cycle_count to get cpu cycles count
+	countEventVals[cpuCyclesIndex] = builder.CreateCall(
+		declareFuncs[sel4BenchGetCycleCountFunc]);
+	// Create call inst to sel4bench_get_counter to get the other event counts
+	for (int i = 1; i < eventIndicesNum; ++i)
+	{
+		Value *s4bgcArg[1] = {ConstantInt::get(context, APInt(64, i - 1))};
+		countEventVals[i] = builder.CreateCall(
+			declareFuncs[sel4BenchGetCounterFunc], s4bgcArg);
+	}
+
+
+	AllocaInst *localEventTmpVars[eventIndicesNum];
+	Function::arg_iterator  arg = beforeCallFunc->arg_begin();
+	for (int i = 0; i < eventIndicesNum; ++i)
+	{
+		// Allocate temp pointer to point to where argument points
+		localEventTmpVars[i] = builder.CreateAlloca(
+			IntegerType::getInt64PtrTy(context));
+		// Store address of argument pointer to temp pointer
+		builder.CreateStore((Value*)(&*arg), localEventTmpVars[i]);
+		// Load the address of temp pointer once to load the value
+		LoadInst* tmpAddrLd1 = builder.CreateLoad(Type::getInt64PtrTy(context),
+			localEventTmpVars[i]);
+		// Load tha value residing at temp pointer address
+		LoadInst* tmpValLd = builder.CreateLoad(Type::getInt64Ty(context),
+			tmpAddrLd1);
+		// add with respective event count
+		Value* totalEventVal = builder.CreateAdd(tmpValLd, countEventVals[i]);
+		// Load the address of temp pointer again now to store the result
+		LoadInst* tmpAddrLd2 = builder.CreateLoad(Type::getInt64PtrTy(context),
+			localEventTmpVars[i]);
+		// Store result to address of temp pointer
+		builder.CreateStore(totalEventVal, tmpAddrLd2);
+		++arg;
+	}
+#ifdef DEBUG_PRINT
+	insertPrint(builder,  std::string(__func__) + " <<" + beforeCallFunc->getName().str()
+		+ ">>: END", nullptr, *bblk->getModule());
+#endif
+	builder.CreateRetVoid();
+	debug_errs(__func__<< ": Exit");
+	return beforeCallFunc;
+}
+
+Function* createAfterCallFunction(Module &M, LLVMContext &context)
+{
+	debug_errs(__func__<< ": Enter");
+	Value *idleOff;
+
+	std::vector<Type*> funcParamsType
+	{
+		Type::getInt64PtrTy(context), // cpu cycles addr
+		Type::getInt64PtrTy(context), // event 0 addr
+		Type::getInt64PtrTy(context), // event 1 addr
+		Type::getInt64PtrTy(context), // event 2 addr
+		Type::getInt64PtrTy(context), // event 3 addr
+		Type::getInt64PtrTy(context), // event 4 addr
+		Type::getInt64PtrTy(context)  // event 5 addr
+	};
+	Type* funcRetType = Type::getVoidTy(context);
+	FunctionType* ft = FunctionType::get(funcRetType, funcParamsType, false);
+	Function* afterCallFunc = Function::Create(ft, Function::ExternalLinkage,
+		"fprof_after_call", &M);
+
+	BasicBlock *bblk = BasicBlock::Create(context, "", afterCallFunc);
+	IRBuilder<> builder(bblk, bblk->begin());
+#ifdef DEBUG_PRINT
+	insertPrint(builder,  std::string(__func__) + " <<" + afterCallFunc->getName().str()
+		+ ">>: START", nullptr, *bblk->getModule());
+#endif
+
+
+	AllocaInst *localEventTmpVars[eventIndicesNum];
+	Function::arg_iterator  arg = afterCallFunc->arg_begin();
+	for (int i = 0; i < eventIndicesNum; ++i)
+	{
+		// Allocate temp pointer to point to where argument points
+		localEventTmpVars[i] = builder.CreateAlloca(
+			IntegerType::getInt64PtrTy(context));
+		// Store address of argument pointer to temp pointer
+		builder.CreateStore((Value*)(&*arg), localEventTmpVars[i]);
+		// Load the address of temp pointer once to load the value
+		LoadInst* tmpAddrLd1 = builder.CreateLoad(Type::getInt64PtrTy(context),
+			localEventTmpVars[i]);
+		// Load tha value residing at temp pointer address
+		LoadInst* tmpValLd = builder.CreateLoad(Type::getInt64Ty(context),
+			tmpAddrLd1);
+		// Load the value of the corresponding global event variable
+		LoadInst *globalEventLd = builder.CreateLoad(
+			globalEventVars[i]->getValueType(), globalEventVars[i]);
+		// add global with local
+		Value* totalEventVal = builder.CreateAdd(tmpValLd, globalEventLd);
+		// Load the address of temp pointer again now to store the result
+		LoadInst* tmpAddrLd2 = builder.CreateLoad(Type::getInt64PtrTy(context),
+			localEventTmpVars[i]);
+		// Store result to address of temp pointer
+		builder.CreateStore(totalEventVal, tmpAddrLd2);
+		++arg;
+	}
+
+	// Create a call inst to sel4bench_reset_counters
+	builder.CreateCall(declareFuncs[sel4BenchRstCounts]);
+
+	// Create a call inst to sel4bench_start_counters/ 0x3F = 0b111111
+	Value *s4bsceArg[1] = {ConstantInt::get(context, APInt(64, 0x3F))};
+	builder.CreateCall(declareFuncs[sel4BenchStartCountsFunc], s4bsceArg);
+
+	CallInst *readPmcr = builder.CreateCall(
+		declareFuncs[sel4BenchPrivReadPmcrFunc]);
+
+	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
+	Value *cycleCounter = builder.CreateOr(readPmcr,
+		ConstantInt::get(context, APInt(32, 0x4)));
+
+	// Create a call inst to sel4bench_private_write_pmcr
+	Value *s4bpwpArg[1] = {cycleCounter};
+	builder.CreateCall(declareFuncs[sel4BenchPrivReadPmcrFunc],
+		s4bpwpArg);
+#ifdef DEBUG_PRINT
+	insertPrint(builder,  std::string(__func__) + " <<" + afterCallFunc->getName().str()
+		+ ">>: END", nullptr, *bblk->getModule());
+#endif
+	builder.CreateRetVoid();
+	debug_errs(__func__<< ": Exit");
+
+	return afterCallFunc;
 }
 
 Function* createEpilogueFunction(Module &M, LLVMContext &context)
