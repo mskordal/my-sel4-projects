@@ -3,7 +3,7 @@
 #include "attester_types.h"
 
 #define CALL_GRAPH_OFFSET 0
-#define STACK_OFFSET 0x1F800
+#define STACK_OFFSET 0x3F800
 
 //NodeData LS word Values
 #define FUNC_ID_MASK 	0x000000ff
