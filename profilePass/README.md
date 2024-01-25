@@ -1,6 +1,7 @@
-# LLVM InjectBRAM Pass
-This is an LLVM Out-Of-Tree Pass for injecting code that reads and writes to
-BRAM.
+# LLVM Profile Pass
+This is an LLVM Out-Of-Tree Pass for injecting code that starts and read
+hardware performance counters on functions that will be profiled, and then sends
+the data over to a hardware design that generates a call graph with that data.
 
 # Useful Information
 Regarding syntax and the pass structure, visit the link:
