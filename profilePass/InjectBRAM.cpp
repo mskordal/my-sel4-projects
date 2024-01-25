@@ -48,7 +48,7 @@ using namespace llvm;
 
 /**@{*/
 /** The physical address of the BRAM where the call graph is stored */
-#define BRAM_ADDRESS 0xa0020000
+#define BRAM_ADDRESS 0xa0040000
 /** The virtual address corresponding to the HLS IP. Mapped by the app */
 #define HLS_VIRT_ADDR 0x7000000 ///< virtual address for our test app
 // #define HLS_VIRT_ADDR 0x10013000 ///< virtual address for ipc benchmark for sel4bench
@@ -100,12 +100,21 @@ using namespace llvm;
 // #define EVENT_4 EVENT_MEMORY_WRITE
 // #define EVENT_5 EVENT_BRANCH_MISPREDICT
 
+// Use those events for profiling
+// #define EVENT_0 EVENT_CACHE_L1D_MISS
+// #define EVENT_1 EVENT_CACHE_L1I_MISS
+// #define EVENT_2 EVENT_TLB_L1D_MISS
+// #define EVENT_3 EVENT_TLB_L1I_MISS
+// #define EVENT_4 EVENT_L2D_CACHE_REFILL
+// #define EVENT_5 EVENT_L2D_CACHE_WB
+
+// Use those events for the attestation system
 #define EVENT_0 EVENT_CACHE_L1D_MISS
-#define EVENT_1 EVENT_CACHE_L1I_MISS
-#define EVENT_2 EVENT_TLB_L1D_MISS
-#define EVENT_3 EVENT_TLB_L1I_MISS
-#define EVENT_4 EVENT_L2D_CACHE_REFILL
-#define EVENT_5 EVENT_L2D_CACHE_WB
+#define EVENT_1 EVENT_EXECUTE_BRANCH_PREDICTABLE
+#define EVENT_2 EVENT_BUS_ACCESS
+#define EVENT_3 EVENT_MEMORY_READ
+#define EVENT_4 EVENT_MEMORY_WRITE
+#define EVENT_5 EVENT_EXECUTE_INSTRUCTION
 /**@}*/
 
 void injectAtFuncEntryBlock(BasicBlock *entryBblk, int funcID,
@@ -268,6 +277,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 
 	Function *mainFunc = M.getFunction("main");
 
+	// In main function initialize counters and set them to specific events 
 	if(mainFunc)
 	{
 		BasicBlock *mainFirstBblk = &mainFunc->getEntryBlock();
@@ -302,6 +312,8 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 		// get function the function
 		Function *func = M.getFunction(funcNames.at(i));
 
+		// function may not exist or may only be declared in this module. In
+		// that case we don't perform any instrumentation
 		if(!func) continue;
 		if(func->empty()) continue;
 
@@ -1136,28 +1148,38 @@ Function* createPrologueFunction(int funcID, Module &M, LLVMContext &context)
 	Function* prologFunc = Function::Create(ft, Function::ExternalLinkage,
 		"fprof_prolog", &M);
 
-	// Create a dummy block with a return to add all other blocks before it
-	BasicBlock *firstBblk = BasicBlock::Create(context, "", prologFunc);
-	IRBuilder<> firstBblkBuilder(firstBblk, firstBblk->begin());
-	AllocaInst* ctrlSigVar = firstBblkBuilder.CreateAlloca(
-			IntegerType::getInt32Ty(context));
+	// Every source file used to compile the image will be scanned by the pass.
+	// We only initialize the counters in the source file withe main function.
+	// We assume that the file is named 'main.xx'
+	std::string fullPathFilename = M.getName().str();
+	std::string filename = std::filesystem::path(fullPathFilename).filename().
+		replace_extension("").string();
+	// In case of profiling multiple files, we want the prologue function to
+	// only be defined in the main file and be declared in the rest.
+	if(filename == "main")
+	{
+		// Create a dummy block with a return to add all other blocks before it
+		BasicBlock *firstBblk = BasicBlock::Create(context, "", prologFunc);
+		IRBuilder<> firstBblkBuilder(firstBblk, firstBblk->begin());
+		AllocaInst* ctrlSigVar = firstBblkBuilder.CreateAlloca(
+				IntegerType::getInt32Ty(context));
 
 
-	BasicBlock *notIdleBblk = createSpinLockOnIdleBitBlock(ctrlSigVar,
-		prologFunc, context, &idleOff);
+		BasicBlock *notIdleBblk = createSpinLockOnIdleBitBlock(ctrlSigVar,
+			prologFunc, context, &idleOff);
 
-	BasicBlock *idleBblk = writeFuncStartToHlsBlock(ctrlSigVar, prologFunc,
-		context, funcID);
+		BasicBlock *idleBblk = writeFuncStartToHlsBlock(ctrlSigVar, prologFunc,
+			context, funcID);
 
-	firstBblkBuilder.CreateBr(notIdleBblk);
+		firstBblkBuilder.CreateBr(notIdleBblk);
 
-	IRBuilder<> notIdleBblkBuilder(notIdleBblk, notIdleBblk->end());
-	notIdleBblkBuilder.CreateCondBr(idleOff, notIdleBblk, idleBblk);
+		IRBuilder<> notIdleBblkBuilder(notIdleBblk, notIdleBblk->end());
+		notIdleBblkBuilder.CreateCondBr(idleOff, notIdleBblk, idleBblk);
 
-	IRBuilder<> idleBblkBuilder(idleBblk, idleBblk->end());
-	idleBblkBuilder.CreateRetVoid();
-	debug_errs(__func__<< ": Exit");
-
+		IRBuilder<> idleBblkBuilder(idleBblk, idleBblk->end());
+		idleBblkBuilder.CreateRetVoid();
+		debug_errs(__func__<< ": Exit");
+	}
 	return prologFunc;
 }
 
@@ -1180,32 +1202,40 @@ Function* createEpilogueFunction(Module &M, LLVMContext &context)
 	FunctionType* ft = FunctionType::get(funcRetType, funcParamsType, false);
 	Function* epilogFunc = Function::Create(ft, Function::ExternalLinkage,
 		"fprof_epilog", &M);
-
-	// Create a dummy block with a return to add all other blocks before it
-	BasicBlock *firstBblk = BasicBlock::Create(context, "", epilogFunc);
-	IRBuilder<> firstBblkBuilder(firstBblk, firstBblk->begin());
-	AllocaInst* ctrlSigVar = firstBblkBuilder.CreateAlloca(
-			IntegerType::getInt32Ty(context));
-
-	BasicBlock *wrGlobBblk = writeGlobalsBeforeReturnBlock(epilogFunc, context);
+	std::string fullPathFilename = M.getName().str();
+	std::string filename = std::filesystem::path(fullPathFilename).filename().
+		replace_extension("").string();
 	
-	BasicBlock *notIdleBblk = createSpinLockOnIdleBitBlock(ctrlSigVar,
-		epilogFunc, context, &idleOff);
+	// In case of profiling multiple files, we want the epilogue function to
+	// only be defined in the main file and be declared in the rest.
+	if(filename == "main")
+	{
+		// Create a dummy block with a return to add all other blocks before it
+		BasicBlock *firstBblk = BasicBlock::Create(context, "", epilogFunc);
+		IRBuilder<> firstBblkBuilder(firstBblk, firstBblk->begin());
+		AllocaInst* ctrlSigVar = firstBblkBuilder.CreateAlloca(
+				IntegerType::getInt32Ty(context));
 
-	BasicBlock *idleBblk = writeFuncEndToHlsBlock(ctrlSigVar, epilogFunc,
-		context);
-	
-	firstBblkBuilder.CreateBr(wrGlobBblk);
+		BasicBlock *wrGlobBblk = writeGlobalsBeforeReturnBlock(epilogFunc, context);
+		
+		BasicBlock *notIdleBblk = createSpinLockOnIdleBitBlock(ctrlSigVar,
+			epilogFunc, context, &idleOff);
 
-	IRBuilder<> wrGlobBblkBuilder(wrGlobBblk, wrGlobBblk->end());
-	wrGlobBblkBuilder.CreateBr(notIdleBblk);
+		BasicBlock *idleBblk = writeFuncEndToHlsBlock(ctrlSigVar, epilogFunc,
+			context);
+		
+		firstBblkBuilder.CreateBr(wrGlobBblk);
 
-	IRBuilder<> notIdleBblkBuilder(notIdleBblk, notIdleBblk->end());
-	notIdleBblkBuilder.CreateCondBr(idleOff, notIdleBblk, idleBblk);
+		IRBuilder<> wrGlobBblkBuilder(wrGlobBblk, wrGlobBblk->end());
+		wrGlobBblkBuilder.CreateBr(notIdleBblk);
 
-	IRBuilder<> idleBblkBuilder(idleBblk, idleBblk->end());
-	idleBblkBuilder.CreateRetVoid();
-	debug_errs(__func__<< ": Exit");
+		IRBuilder<> notIdleBblkBuilder(notIdleBblk, notIdleBblk->end());
+		notIdleBblkBuilder.CreateCondBr(idleOff, notIdleBblk, idleBblk);
+
+		IRBuilder<> idleBblkBuilder(idleBblk, idleBblk->end());
+		idleBblkBuilder.CreateRetVoid();
+		debug_errs(__func__<< ": Exit");
+	}
 	return epilogFunc;
 }
 
