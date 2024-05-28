@@ -1,4 +1,0 @@
-tuned_STREAM_Copy 3
-tuned_STREAM_Scale 4
-tuned_STREAM_Add 5
-tuned_STREAM_Triad 6

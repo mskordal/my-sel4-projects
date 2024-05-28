@@ -33,6 +33,8 @@ llvmpassbuild/
 *.bak
 *.pdf
 *.ila
+*.png
+*.svg
 
 # directories that can be created to store files that we dont want to push
 mskordal-backup*
