@@ -9,29 +9,20 @@ Regarding syntax and the pass structure, visit the link:
 
 # Files
 All files required to build the LLVM Pass, reside in
-[myLllvmPass](https://github.com/mskordal/my-sel4-projects/tree/main/myLlvmPass).
+[accProfPass](https://github.com/mskordal/my-sel4-projects/tree/main/accProfPass).
 - **CMakeLists.txt**: Passes are built using `cmake` and then `make`.
 
-- **InjectBRAM.h**: The header file of our pass. Here we define the name of the
+- **AccProf.h**: The header file of our pass. Here we define the name of the
   pass in the form of a class and declare the `run` function which is the
   function that runs once the pass is enabled. All functions of our pass must
   be declared in the header file. They can later be called through the `run`
   function.
 
-- **InjectBRAM.cpp**: The cpp file of our pass. All functionality of the pass
+- **AccProf.h.cpp**: The cpp file of our pass. All functionality of the pass
   is here for the time being. Apart from the functions that our pass uses to
-  analyse or instrument code, we define `getInjectBRAMPluginInfo` of type
+  analyse or instrument code, we define `getAccProfPluginInfo` of type
   `llvm::PassPluginLibraryInfo` and the code inside is used to register our
   Pass to the LLVM in order to run it withtools like `opt`.
-
-- **app.c**: A dummy standalone programme used to test our pass.
-
-- **gfc.c**: A dummy programme that calls a sequence of functions that do
-  nothing. It is used to test call graph generation and the pass functionality.
-
-- **gfcmod.c**: The `gfc.c` file with added c instructions that operate on the
-  HLS IP. It is used to translate it with clang to IR code, and then implement
-  those IR instructions in the pass for injection.
 
 - **prof-func-list.md**: Contains presets of functions and IDs to quickly copy
   them to `functions.txt` depending on which application is being profiled.
@@ -45,24 +36,31 @@ export LLVM_DIR=/usr/lib/llvm-15
 # Create build directory and enter.
 mkdir llvmpassbuild && cd llvmpassbuild
 
-# Create the Makefiles and links to build the pass.
-cmake -DLT_LLVM_INSTALL_DIR=$LLVM_DIR ../myLlvmPass
+# Create the Makefiles and links to build the pass with attributes explained:
+# 1. -DLT_LLVM_INSTALL_DIR=$LLVM_DIR : Installation directory of LLVM
+# 2. ../accProfPass : Directory of pass sources and CMakeLists.txt
+# 3. -DUSE_CLANG=ON : Pass is compiled to be passed with clang. Omit to compile
+# the pass to be used with opt.
+# 4. -DUSE_HLS=ON : Injects instructions that rd/wr to HLS. Omit to instrument
+# instructions that rd/wr to AccProf-soft
+# 5. -DDEBUG_COMP_PRINT=ON : Prints debug messages during pass instrumentation
+cmake -DLT_LLVM_INSTALL_DIR=$LLVM_DIR ../accProfPass -DUSE_CLANG=ON -DUSE_HLS=ON -DDEBUG_COMP_PRINT=ON
 
-# Actually build the pass. It will be libInjectBRAM.so in our case.
+# Actually build the pass. It will be libAccProf.so in our case.
 make
 
 # Compile the dummy programm into IR format.
 $LLVM_DIR/bin/clang -O1 -S -emit-llvm ../myLlvmPass/app.c -o app.ll
 
 # Use the plugin at the IR file. First case is for instrumentations passes
-$LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram app.ll -S -o derived.ll
+$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt. -passes=accprof app.ll -S -o derived.ll
 
 # Second case is for analyses Passes
-$LLVM_DIR/bin/opt -load-pass-plugin ./libInjectBRAM.so -passes=inject-bram -disable-output app.ll
+$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt -passes=accprof -disable-output app.ll
 
 # To directly inject the pass through clang without using opt, run the command
 # below. Also for some reason this works even with -O0
-$LLVM_DIR/bin/clang -O0 -fpass-plugin=./libInjectBRAM.so -g ../myLlvmPass/app.c -o app
+$LLVM_DIR/bin/clang -O0 -fplugin=./libAccProf.so -fpass-plugin=./libAccProf.so -mllvm functions.txt -g ../accProfPass/app.c -o app
 
 ```
 # Pass functionality. Current version: 1.8
@@ -108,7 +106,8 @@ separated by space. Check `prof-func-list.md` for examples.
    local variable and then assigns the sum to the corresponding global variable.
    It then writes the global values to the HLS hardware.
 The next steps apply for every function listed in `functions.txt`:
-1. In the function prologue the pass defines 7 local variables that to store counted events and then calls `fprof_prolog`.
+1. In the function prologue the pass defines 7 local variables that to store
+   counted events and then calls `fprof_prolog`.
 2. In the body of each function, the pass searches for calls to those same
    functions. Before each call instruction, the pass stores the current event
    values since when the callee will be called, the counters will be reset. Then

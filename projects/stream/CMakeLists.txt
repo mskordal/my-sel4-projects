@@ -8,19 +8,22 @@ cmake_minimum_required(VERSION 3.7.2)
 
 include(settings.cmake)
 
-project(mapping C ASM)
+project(stream C ASM)
 
 # Kernel configuration variables
 # sets EXPORT_PMU_USER: true which enables PMU usage on userspace. This allows
 # the usage of performance counters
 set(KernelArmExportPMUUser ON CACHE BOOL "" FORCE) 
 
+SET(LLVMPass "" CACHE FILEPATH "The LLVM pass to instrument the app")
+SET(FunctionsFile "" CACHE FILEPATH "The text file with the functions the pass takes")
+
 find_package(seL4 REQUIRED)
 find_package(elfloader-tool REQUIRED)
 find_package(musllibc REQUIRED)
 find_package(util_libs REQUIRED)
 find_package(seL4_libs REQUIRED)
-find_package(attester_sw REQUIRED)
+find_package(accprof_soft REQUIRED)
 
 sel4_import_kernel()
 elfloader_import_project()
@@ -30,25 +33,28 @@ musllibc_setup_build_environment_with_sel4runtime()
 sel4_import_libsel4()
 util_libs_import_libraries()
 sel4_libs_import_libraries()
-attester_sw_import_library()
+accprof_soft_import_library()
 
-add_executable(app src/app.c)
+# add_executable(app src/app.c)
 
-# Include the pass in the app elf file
-#target_compile_options(app PRIVATE -fpass-plugin=/home/mskordal/workspace/myRepos/my-sel4-projects/llvmpassbuild/libInjectBRAM.so)
+# # Include the pass in the app elf file
+# #target_compile_options(app PRIVATE -fpass-plugin=/home/mskordal/workspace/myRepos/my-sel4-projects/llvmpassbuild/libInjectBRAM.so)
 
-target_link_libraries(app
-	sel4 muslc sel4muslcsys
-	sel4utils)
+# target_link_libraries(app
+# 	sel4 muslc sel4muslcsys
+# 	sel4utils)
 
 
-include(cpio)
-MakeCPIO(archive.o "$<TARGET_FILE:app>")
+# include(cpio)
+# MakeCPIO(archive.o "$<TARGET_FILE:app>")
 
-add_executable(stream archive.o src/main.c)
+# add_executable(stream archive.o src/main.c)
+add_executable(stream src/main.c)
 
-# Include the pass in the main elf file
-target_compile_options(stream PRIVATE -O0 -fpass-plugin=/home/mskordal/workspace/myRepos/my-sel4-projects/llvmpassbuild/libInjectBRAM.so)
+target_compile_options( stream PRIVATE 
+                        -O0
+                        -fplugin=${LLVMPass} -fpass-plugin=${LLVMPass} -mllvm ${FunctionsFile}
+)
 
 target_link_libraries(stream 
 	sel4
@@ -60,7 +66,7 @@ target_link_libraries(stream
     sel4debug
 	sel4allocman
     sel4bench
-	attester_sw
+	accprof_soft
 )
 
 

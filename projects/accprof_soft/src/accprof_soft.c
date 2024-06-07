@@ -4,7 +4,7 @@
 #include <sel4/simple_types.h>
 #include <utils/attribute.h>
 
-#include "attester_sw.h"
+#include "accprof_soft.h"
 
 #define CALL_GRAPH_OFFSET 0
 #define STACK_OFFSET 0x8000
@@ -44,7 +44,7 @@ seL4_Uint16 stack[1024];
 seL4_Uint32 call_graph[32768];
 
 
-void attester_top_func( seL4_Uint32 nodeDataLs, seL4_Uint32 nodeDataMs,
+void accprof_soft_top_func( seL4_Uint32 nodeDataLs, seL4_Uint32 nodeDataMs,
 	seL4_Uint32 cpuCyclesLs, seL4_Uint32 cpuCyclesMs, seL4_Uint32 event0Ls,
 	seL4_Uint32 event0Ms, seL4_Uint32 event1Ls, seL4_Uint32 event1Ms,
 	seL4_Uint32 event2Ls, seL4_Uint32 event2Ms, seL4_Uint32 event3Ls,
@@ -102,7 +102,7 @@ void attester_top_func( seL4_Uint32 nodeDataLs, seL4_Uint32 nodeDataMs,
 	}
 }
 
-void attester_print(void)
+void accprof_soft_print(void)
 {
 	seL4_Uint16 i, j, fid, flvl;
 	seL4_Uint64 cpuCycles, event0, event1, event2, event3, event4, event5;

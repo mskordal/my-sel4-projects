@@ -23,7 +23,7 @@
 
 #include <sel4bench/sel4bench.h>
 
-#include <attester_sw.h>
+#include <accprof_soft.h>
 
 /**
  * STREAM DEFINES START
@@ -91,7 +91,7 @@
 #endif
 #endif
 #ifndef NTIMES
-#   define NTIMES	500
+#   define NTIMES	50
 #endif
 
 /*  Users are allowed to modify the "OFFSET" variable, which *may* change the
@@ -293,30 +293,30 @@ int main(void)
 
 
 	/* use sel4utils to make a new process */
-	sel4utils_process_t new_process;
+	// sel4utils_process_t new_process;
 
-	sel4utils_process_config_t config = process_config_default_simple(&simple,
-		APP_IMAGE_NAME, APP_PRIORITY);
-	error = sel4utils_configure_process_custom(&new_process, &vka, &vspace,
-		config);
-	ZF_LOGF_IFERR(error, "Failed to spawn a new thread.\n");
+	// sel4utils_process_config_t config = process_config_default_simple(&simple,
+	// 	APP_IMAGE_NAME, APP_PRIORITY);
+	// error = sel4utils_configure_process_custom(&new_process, &vka, &vspace,
+	// 	config);
+	// ZF_LOGF_IFERR(error, "Failed to spawn a new thread.\n");
 
-	/* give the new process's thread a name */
-	NAME_THREAD(new_process.thread.tcb.cptr, "dynamic-3: process_2");
+	// /* give the new process's thread a name */
+	// NAME_THREAD(new_process.thread.tcb.cptr, "dynamic-3: process_2");
 
 /**
 	 * create arguments to pass to the process when it is spawned. Here we pass
 	 * one argument of value 5
 	 */
-	seL4_Word argc = 1;
-	char string_args[argc][WORD_STRING_SIZE];
-	char* argv[argc];
-	sel4utils_create_word_args(string_args, argv, argc, 5);
+	// seL4_Word argc = 1;
+	// char string_args[argc][WORD_STRING_SIZE];
+	// char* argv[argc];
+	// sel4utils_create_word_args(string_args, argv, argc, 5);
 
-	/* spawn the process */
-	error = sel4utils_spawn_process_v(&new_process, &vka, &vspace, argc,
-		(char**) &argv, 1);
-	ZF_LOGF_IFERR(error, "Failed to spawn and start the new thread.\n");
+	// /* spawn the process */
+	// error = sel4utils_spawn_process_v(&new_process, &vka, &vspace, argc,
+	// 	(char**) &argv, 1);
+	// ZF_LOGF_IFERR(error, "Failed to spawn and start the new thread.\n");
 
 	vka_object_t bram_frame_object;
 

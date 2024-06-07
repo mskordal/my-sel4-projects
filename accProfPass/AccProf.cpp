@@ -1,7 +1,8 @@
-#include "Profile.h"
+#include "AccProf.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
@@ -18,7 +19,7 @@ using namespace llvm;
 // #define DEBUG_PRINT
 
 /** Uncomment to make enable debug prints during compilation */
-#define DEBUG_COMP_PRINT
+// #define DEBUG_COMP_PRINT
 
 /**
  * Uncomment when using sel4bench. Benchmarks terminate on benchmark_finished
@@ -30,13 +31,13 @@ using namespace llvm;
  * Uncomment to make the pass inject instructions for HLS IP communication or
  * comment to inject instruction for the software implementation of the profiler
  */
-#define USE_HLS
+// #define USE_HLS
 
 /**
  * Uncomment to compile the pass to be injected during compilaction with clang.
  * Comment to be injected during compilation with opt.
  */
-// #define SET_PASS_ON_CLANG
+// #define USE_CLANG
 
 /**@}*/
 
@@ -101,20 +102,20 @@ using namespace llvm;
 // #define EVENT_5 EVENT_BRANCH_MISPREDICT
 
 // Use those events for profiling
-// #define EVENT_0 EVENT_CACHE_L1D_MISS
-// #define EVENT_1 EVENT_CACHE_L1I_MISS
-// #define EVENT_2 EVENT_TLB_L1D_MISS
-// #define EVENT_3 EVENT_TLB_L1I_MISS
-// #define EVENT_4 EVENT_L2D_CACHE_REFILL
-// #define EVENT_5 EVENT_L2D_CACHE_WB
+#define EVENT_0 EVENT_CACHE_L1D_MISS
+#define EVENT_1 EVENT_CACHE_L1I_MISS
+#define EVENT_2 EVENT_TLB_L1D_MISS
+#define EVENT_3 EVENT_TLB_L1I_MISS
+#define EVENT_4 EVENT_L2D_CACHE_REFILL
+#define EVENT_5 EVENT_L2D_CACHE_WB
 
 // Use those events for the attestation system
-#define EVENT_0 EVENT_CACHE_L1D_MISS
-#define EVENT_1 EVENT_EXECUTE_BRANCH_PREDICTABLE
-#define EVENT_2 EVENT_BUS_ACCESS
-#define EVENT_3 EVENT_MEMORY_READ
-#define EVENT_4 EVENT_MEMORY_WRITE
-#define EVENT_5 EVENT_EXECUTE_INSTRUCTION
+// #define EVENT_0 EVENT_CACHE_L1D_MISS
+// #define EVENT_1 EVENT_EXECUTE_BRANCH_PREDICTABLE
+// #define EVENT_2 EVENT_BUS_ACCESS
+// #define EVENT_3 EVENT_MEMORY_READ
+// #define EVENT_4 EVENT_MEMORY_WRITE
+// #define EVENT_5 EVENT_EXECUTE_INSTRUCTION
 /**@}*/
 
 void injectAtFuncEntryBlock(BasicBlock *entryBblk, int funcID,
@@ -142,6 +143,8 @@ void insertPrint(IRBuilder<> &builder, std::string msg, Value *val, Module &M);
 	std::vector<Instruction *> getTermInst(Function *func);
 #endif
 
+cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required);
+
 enum eventIndices
 {
 	cpuCyclesIndex,
@@ -157,8 +160,8 @@ enum eventIndices
 enum declareFuncs
 {
 #ifndef USE_HLS
-	attesterTopFunc,
-	attesterPrintFunc,
+	accprofSoftTopFunc,
+	accprofSoftPrintFunc,
 #endif
 	sel4BenchInitFunc,
 	sel4BenchRstCounts,	
@@ -183,8 +186,8 @@ AllocaInst *localEventVars[eventIndicesNum]; ///< Locals: events0-5 & cpu
 std::string declareFuncNames[declareFuncsNum] =
 {
 #ifndef USE_HLS
-	"attester_top_func",
-	"attester_print",
+	"accprof_soft_top_func",
+	"accprof_soft_print",
 #endif
 	"sel4bench_init",
 	"sel4bench_reset_counters",
@@ -197,24 +200,40 @@ std::string declareFuncNames[declareFuncsNum] =
 };
 Function *declareFuncs[declareFuncsNum] = {nullptr};
 
-PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
+PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 {
+	std::ifstream *funcFile;
 	std::string line;
-	std::ifstream myfile("/home/mskordal/workspace/myRepos/my-sel4-projects/myLlvmPass/functions.txt");
+
+	if (InputFilename.getNumOccurrences() > 0)
+		funcFile = new std::ifstream(InputFilename);
+	else
+	{
+		errs() << "List of functions to profile, was not provided";
+		exit(1);
+	}
 	std::vector<std::string> funcNames;
 	std::vector<int> funcIds;
 
 #ifdef DEBUG_PRINT
-	errs() << "DEBUG_PRINT define is enabled. This will enable in-app prints\n";
+	errs() << "DEBUG_PRINT is enabled. printf calls will be instrumented\n";
+#endif
+#ifdef DEBUG_COMP_PRINT
+	errs() <<	"DEBUG_COMP_PRINT is enabled. debug messages will be printed"
+				"during compilation\n";
 #endif
 #ifdef USE_HLS
-	errs() << "USE_HLS define is enabled. The pass will rd/wr to HLS IP\n";
+	errs() << "USE_HLS is enabled. Pass will rd/wr to HLS\n";
 #else
-	errs() << 	"USE_HLS define is disabled. The pass will rd/wr to the"
-				"software implementation of the HLS IP\n";
+	errs() << "USE_HLS is disabled. pass will rd/wr to AccProf-soft\n";
+#endif	
+#ifdef USE_CLANG
+	errs() << "USE_CLANG is enabled. Pass is built to be passed through clang\n";
+#else
+	errs() << "USE_CLANG is disabled. Pass is built to be passed through opt\n";
 #endif	
 
-	while (getline(myfile, line))
+	while (getline(*funcFile, line))
 	{
 		int delim_pos = line.find(" ");
 		funcNames.push_back(line.substr(0, delim_pos));
@@ -356,7 +375,7 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 				localEventVars[event5Index]
 			};
 			CallInst *epilogFuncCi = CallInst::Create(epilogFunc->getFunctionType(),
-				epilogFunc, epilogFuncArgs, "fprof_epilog");
+				epilogFunc, epilogFuncArgs, "accprof_epilog");
 			epilogFuncCi->insertBefore(instr);
 		}
 		debug_errs(funcNames.at(i) << " instrumentation done!!");
@@ -378,9 +397,9 @@ PreservedAnalyses InjectBRAMMod::run(Module &M, ModuleAnalysisManager &AM)
 				bblk = SplitBlock(bblk, instr);
 			
 			IRBuilder<> endBuilder(bblk, bblk->begin());
-			endBuilder.CreateCall(declareFuncs[attesterPrintFunc]);
+			endBuilder.CreateCall(declareFuncs[accprofSoftPrintFunc]);
 		}
-		debug_errs(declareFuncNames[attesterPrintFunc] << " instrumentation done!!");
+		debug_errs(declareFuncNames[accprofSoftPrintFunc] << " instrumentation done!!");
 #endif
 	}
 
@@ -646,8 +665,8 @@ BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
 		ConstantPointerNull::get(Type::getInt32PtrTy(context))
 	};
-	builder.CreateCall(declareFuncs[attesterTopFunc], atfArgs);
-	debug_errs("\ninserted call to attester-top");
+	builder.CreateCall(declareFuncs[accprofSoftTopFunc], atfArgs);
+	debug_errs("\ninserted call to accprof_soft_top_func");
 #endif
 
 	// Create a call inst to sel4bench_reset_counters
@@ -843,7 +862,7 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 #endif
 
 #ifndef USE_HLS
-	builder.CreateCall(declareFuncs[attesterTopFunc], atfArgs);
+	builder.CreateCall(declareFuncs[accprofSoftTopFunc], atfArgs);
 #endif
 #ifdef DEBUG_PRINT
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
@@ -1137,6 +1156,14 @@ std::vector<Instruction *> getTermInst(Function *func)
 }
 #endif
 
+
+/**
+ * Defines a function to which call instructions will be injected by the pass,
+ * at the prologue of each function that will be profiled.
+ * @param M The current Module Object
+ * @param context The context of current Module
+ * @return The object to the function created
+ */
 Function* createPrologueFunction(int funcID, Module &M, LLVMContext &context)
 {
 	debug_errs(__func__<< ": Enter");
@@ -1146,7 +1173,7 @@ Function* createPrologueFunction(int funcID, Module &M, LLVMContext &context)
 	Type* funcRetType = Type::getVoidTy(context);
 	FunctionType* ft = FunctionType::get(funcRetType, funcParamsType, false);
 	Function* prologFunc = Function::Create(ft, Function::ExternalLinkage,
-		"fprof_prolog", &M);
+		"accprof_prolog", &M);
 
 	// Every source file used to compile the image will be scanned by the pass.
 	// We only initialize the counters in the source file withe main function.
@@ -1183,6 +1210,13 @@ Function* createPrologueFunction(int funcID, Module &M, LLVMContext &context)
 	return prologFunc;
 }
 
+/**
+ * Defines a function to which call instructions will be injected by the pass,
+ * before each return instruction of a function that will be profiled.
+ * @param M The current Module Object
+ * @param context The context of current Module
+ * @return The object to the function created
+ */
 Function* createEpilogueFunction(Module &M, LLVMContext &context)
 {
 	debug_errs(__func__<< ": Enter");
@@ -1201,7 +1235,7 @@ Function* createEpilogueFunction(Module &M, LLVMContext &context)
 	Type* funcRetType = Type::getVoidTy(context);
 	FunctionType* ft = FunctionType::get(funcRetType, funcParamsType, false);
 	Function* epilogFunc = Function::Create(ft, Function::ExternalLinkage,
-		"fprof_epilog", &M);
+		"accprof_epilog", &M);
 	std::string fullPathFilename = M.getName().str();
 	std::string filename = std::filesystem::path(fullPathFilename).filename().
 		replace_extension("").string();
@@ -1239,6 +1273,14 @@ Function* createEpilogueFunction(Module &M, LLVMContext &context)
 	return epilogFunc;
 }
 
+/**
+ * Iterates over the SeL4 function names in @c declareFuncNames and for every
+ * function that is not visible in the module, it creates an external
+ * declaration to it, so that it can be compiled successfully before linking
+ * phase.
+ * @param M The current Module Object
+ * @param context The context of current Module
+ */
 void createExternalFunctionDeclarations(Module &M, LLVMContext &context)
 {
 	debug_errs(__func__<< ": Enter");
@@ -1314,6 +1356,14 @@ void createExternalFunctionDeclarations(Module &M, LLVMContext &context)
 
 
 #ifdef DEBUG_PRINT
+/**
+ * Convenient function that injects printf calls. Useful for inspecting values
+ * generated at runtime.
+ * @param builder Builder of the Basic Block where the printf call will be added
+ * @param msg A string message that will be displayed by printf
+ * @param val An optional value to be displayed after msg by printf
+ * @param M The current Module Object
+ */
 void insertPrint(IRBuilder<> &builder, std::string msg, Value *val, Module &M)
 {
 	Value *formatString;
@@ -1341,21 +1391,21 @@ void insertPrint(IRBuilder<> &builder, std::string msg, Value *val, Module &M)
 }
 #endif
 
-#ifdef SET_PASS_ON_CLANG
+#ifdef USE_CLANG
 //-----------------------------------------------------------------------------
 // New PM Registration - use this for loading the pass on a c file with clang
 //-----------------------------------------------------------------------------
-llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
+llvm::PassPluginLibraryInfo getAccProfModPluginInfo()
 {
-	// std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
+	// std::cerr << "getAccProfModPluginInfo() called\n"; // add this line
 	return {
-		LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
+		LLVM_PLUGIN_API_VERSION, "AccProfMod", LLVM_VERSION_STRING,
 		[](PassBuilder &PB)
 		{
 			PB.registerOptimizerEarlyEPCallback(
 				[](ModulePassManager &MPM, OptimizationLevel)
 				{
-					MPM.addPass(InjectBRAMMod());
+					MPM.addPass(AccProfMod());
 					return true;
 				});
 		}};
@@ -1364,12 +1414,12 @@ llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
 // -----------------------------------------------------------------------------
 // New PM Registration - use this for loading the pass on an ll file with opt
 // -----------------------------------------------------------------------------
-llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
+llvm::PassPluginLibraryInfo getAccProfModPluginInfo()
 {
-	 //std::cerr << "getInjectBRAMModPluginInfo() called\n"; // add this line
+	 //std::cerr << "getAccProfModPluginInfo() called\n"; // add this line
 	return
 	{
-		LLVM_PLUGIN_API_VERSION, "InjectBRAMMod", LLVM_VERSION_STRING,
+		LLVM_PLUGIN_API_VERSION, "AccProfMod", LLVM_VERSION_STRING,
 		[](PassBuilder &PB)
 		{
 			PB.registerPipelineParsingCallback
@@ -1377,9 +1427,9 @@ llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
 				[](StringRef Name, ModulePassManager &MPM,
 				ArrayRef<PassBuilder::PipelineElement>)
 				{
-					if (Name == "inject-bram")
+					if (Name == "accprof")
 					{
-						MPM.addPass(InjectBRAMMod());
+						MPM.addPass(AccProfMod());
 						return true;
 					}
 					return false;
@@ -1395,5 +1445,5 @@ llvm::PassPluginLibraryInfo getInjectBRAMModPluginInfo()
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo()
 {
-	return getInjectBRAMModPluginInfo();
+	return getAccProfModPluginInfo();
 }

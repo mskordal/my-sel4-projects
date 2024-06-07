@@ -1,15 +1,15 @@
-#ifndef LLVM_INJECT_BRAM_H
-#define LLVM_INJECT_BRAM_H
+#ifndef LLVM_ACCPROF_H
+#define LLVM_ACCPROF_H
 
 #include "llvm/IR/PassManager.h"
 
 namespace llvm
 {
-	class InjectBRAMMod : public PassInfoMixin<InjectBRAMMod>
+	class AccProfMod : public PassInfoMixin<AccProfMod>
 	{
 		public:
 			PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 	};
 } // namespace llvm
 
-#endif // LLVM_INJECT_BRAM_H
+#endif // LLVM_ACCPROF_H
