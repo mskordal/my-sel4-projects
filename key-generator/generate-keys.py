@@ -6,6 +6,12 @@ to a dataset. Then it generates a key list for every function instance that
 contains a key and the amount of LS bits that were discarded (right-shifted)
 for every event. We need this number for the LLVM pass to know how many bits to
 right-shift on the events counted during execution
+
+Input Arguments
+---------------
+path: str
+	The path to evaluation files and where keys and event-shifts file will be
+	created
 """
 
 import csv
@@ -15,6 +21,14 @@ import pprint
 
 EXPERIMENT_FILE_OFFSET = 2
 A53_MAX_COUNTERS_NUM = 6
+
+KEYS_IDX = 0
+EVENT_SHIFTS_IDX = 1
+
+KEYS_FILE = "keys.csv"
+EVENT_SHIFTS_FILE = "event-shifts.csv"
+
+
 
 functions_num = 0
 events_num = 0
@@ -28,8 +42,9 @@ def main():
 		path += "/"
 	init_globals_and_path(path)
 	dataset = init_dataset(path)
-	key_list = create_key_list(dataset)
-	write_key_list_to_file(key_list, path)
+	lists = create_lists(dataset)
+	write_list_to_file(lists[KEYS_IDX], path, KEYS_FILE)
+	write_list_to_file(lists[EVENT_SHIFTS_IDX], path, EVENT_SHIFTS_FILE)
 
 
 def init_globals_and_path(path: str):
@@ -52,7 +67,11 @@ def init_globals_and_path(path: str):
 	"""
 	global functions_num, events_num, execs_num, files
 	try:
-		os.remove(path + 'keys.csv')
+		os.remove(path + KEYS_FILE)
+	except FileNotFoundError:
+		pass
+	try:
+		os.remove(path + EVENT_SHIFTS_FILE)
 	except FileNotFoundError:
 		pass
 	files = os.listdir(path)
@@ -97,7 +116,7 @@ def init_dataset(path: str) -> list[list[list[int]]]:
 	return dataset
 
 
-def create_key_list(dataset: list[list[list[int]]]) -> list[list[int]]:
+def create_lists(dataset: list[list[list[int]]]) -> list[list[int]]:
 	"""
 	Takes a dataset containing event counts, and creates a 2D key list. Each
 	row corresponds to a function and each column except the last, corresponds
@@ -117,7 +136,8 @@ def create_key_list(dataset: list[list[list[int]]]) -> list[list[int]]:
 	list[list[int]]
 		The key list containing the keys and amount of bits shifted of events
 	"""
-	key_list = [[0 for _ in range(events_num + 1)] for _ in range(functions_num)]
+	key_list = []
+	event_shifts_list = [[0 for _ in range(events_num)] for _ in range(functions_num)]
 	for func in range(functions_num): # Every function instance will generate 1 key
 		total_stable_bits_num = 0
 		total_stable_bits = 0
@@ -132,35 +152,39 @@ def create_key_list(dataset: list[list[list[int]]]) -> list[list[int]]:
 			xor_event_count_msb_pos = get_msb_pos(xor_event_count)
 			event_unstable_bits_num = xor_event_count_msb_pos + 1
 			event_stable_bits = max_event_count >> event_unstable_bits_num
-			key_list[func][event] = event_unstable_bits_num;
+			event_shifts_list[func][event] = event_unstable_bits_num;
 			print(f'bits shifted for event {event}: {event_unstable_bits_num}')
 			event_stable_bits_lsl = event_stable_bits << total_stable_bits_num
 			total_stable_bits = total_stable_bits | event_stable_bits_lsl
 			total_stable_bits_num += max_event_count_msb_pos - xor_event_count_msb_pos
 			pprint.pprint(f'    {bin(max_event_count)}:{bin(min_event_count)}:{bin(xor_event_count)}:{bin(event_stable_bits)}')
-		key_list[func][events_num] = total_stable_bits;
+		key_list.append(total_stable_bits);
 		pprint.pprint(f'key (bin): {bin(total_stable_bits)}:')
 		pprint.pprint(f'key (dec): {total_stable_bits}:')
-	return key_list
+	return [key_list, event_shifts_list]
 
 
-def write_key_list_to_file(key_list: list[list[int]], path: str):
+def write_list_to_file(alist: list[any], path: str, output_file: str):
 	"""
-	Goes to the path specified and (1) writes the contents of key_list to a
-	csv file
+	Goes to the path specified and  writes the contents of alist to output_file
 
 	Parameters
 	----------
-	key_list: list[list[int]]
-		The key list to write to the csv file
+	alist: list[Any]
+		The list to write to the output file
 	path: str
-		The path to evaluation files and where key file will be created
+		The path to evaluation files and where the output file will be created
+	filename: str
+		The output file to write the list contents
 	"""
-	csv_file = open(path + 'keys.csv', 'w+')
+	csv_file = open(path + output_file, 'w+')
 	csv_writer = csv.writer(csv_file)
-	csv_writer.writerow(['event0-shift','event1-shift','event2-shift','event3-shift','event4-shift','event5-shift','event6-shift','function-key'])
 	for func in range(functions_num):
-		csv_writer.writerow(key_list[func])
+		if type(alist[func]) == type([]):
+			csv_writer.writerow(alist[func])
+		else:
+			csv_writer.writerow([alist[func]])
+			
 	csv_file.close()
 
 
