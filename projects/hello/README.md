@@ -67,34 +67,63 @@ build a specific application. In this case I named our application directory
 project.
 
 # Downloading, Building and running the project
-
+First clone this repository and enter the directory. Then clone the following
+SeL4 repositories:
 ```bash
 # SeL4 must be inside a directory named 'kernel'
-git clone https://github.com/seL4/seL4.git kernel
+git clone git@github.com:seL4/seL4.git kernel
 
 # The SeL4 tools must be inside a directroy named 'tools'
-git clone https://github.com/seL4/seL4_tools.git tools
-
-# Create 'projects' folder
-mkdir projects
+git clone git@github.com:seL4/seL4_tools.git tools
 
 # Clone seL4_libs repo into projects/seL4_libs
-git clone https://github.com/seL4/seL4_libs.git projects/seL4_libs
+git clone git@github.com:seL4/seL4_libs.git projects/seL4_libs
 
 # Clone the musl libc into projects/musllibc
-git clone https://github.com/seL4/musllibc.git projects/musllibc
+git clone git@github.com:seL4/musllibc.git projects/musllibc
 
 # Clone util_libs repo into projects/util_libs
-git clone https://github.com/seL4/util_libs.git projects/util_libs
+git clone git@github.com:seL4/util_libs.git projects/util_libs
+
+# Clone sel4runtime repo int projects/sel4runtime
+git clone git@github.com:seL4/sel4runtime.git projects/sel4runtime
 
 # seL4_tools contains a useful script that builds a SeL4 project using cmake:
 # 'init-build.sh'. Let's sym-link it in our root directory.
 ln -s tools/cmake-tool/init-build.sh init-build.sh
 
+# A settings file used by each project. init-build.sh looks for it in the root
+# directory so we create a symbolic link
+ln -s projects/hello/easy-settings.cmake easy-settings.cmake
 ```
-All files required for the project are put into the `hello` directory. First of
-all let's create a simple source file that just prints the "Hello World"
-message. File is located in the
+All files required for every project are put into their respective
+`projects/<project>` directory.
+
+To build and run the `hello` project, we run the following:
+```bash
+# create a build directory and enter
+mkdir build && cd build
+
+#The following are 3 examples of how you could build a project
+# run the initialization script for x86 64bit and make it a QEMU simulation
+../init-build.sh  -DPLATFORM=x86_64 -DSIMULATION=TRUE
+# or equivalently to simulate on an Aarch64 machine
+../init-build.sh -DPLATFORM=qemu-arm-virt -DSIMULATION=TRUE
+# finally this is how we compile for our ZCU102 board
+../init-build.sh -DPLATFORM=zcu102 -DTRIPLE=aarch64-linux-gnu
+# build the project
+ninja
+
+# run the build generated script that invokes QEMU if built with SIMULATION=TRUE
+./simulate
+```
+You should see the "Hello World!" message followed by a printf warning and
+a capability fault. If in QEMU, you can exit with `Ctrl-a + x`.
+
+Additional useful flags for `init-build.sh`:
+- `-DTRIPLE=aarch64-linux-gnu`: DTRIPLE allows to use clang instead of gcc.
+  aarch64-linux-gnu specifies that we want to compile for ARM 64bit
+Next we explain how we made the files for the `hello` project at:
 [projects/hello/src/](https://github.com/mskordal/my-sel4-projects/tree/main/projects/hello/src)
 path.
 
@@ -154,25 +183,3 @@ create a symbolic link to `easy-settings.cmake` in the root directory, since
 ```bash
 ln -s projects/hello/easy-settings.cmake easy-settings.cmake
 ```
-Finally to build and run the project, we run the following:
-```bash
-# create a build directory and enter
-mkdir build && cd build
-
-# run the initialization script for x86 64bit and make it a QEMU simulation
-../init-build.sh  -DPLATFORM=x86_64 -DSIMULATION=TRUE
-# or equivalently to simulate on an Aarch64 machine
-../init-build.sh -DPLATFORM=qemu-arm-virt -DSIMULATION=TRUE
-
-# build the project
-ninja
-
-# run the build generated script that invokes QEMU
-./simulate
-```
-You should see the "Hello World!" message followed by a printf warning and
-a capability fault. You can exit QEMU with `Ctrl-a + x`.
-
-Additional useful flags for `init-build.sh`:
-- `-DTRIPLE=aarch64-linux-gnu`: DTRIPLE allows to use clang instead of gcc.
-  aarch64-linux-gnu specifies that we want to compile for ARM 64bit
