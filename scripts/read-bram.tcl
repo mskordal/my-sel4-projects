@@ -1,4 +1,10 @@
-set filename [lindex $argv 0]
+set dirname "results"
+set filename "$dirname/[lindex $argv 0]"
+
+# Check if the directory exists
+if {![file exists $dirname]} {
+	file mkdir $dirname
+}
 set logfile [open $filename "w"]
 
 connect

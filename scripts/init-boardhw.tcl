@@ -6,7 +6,7 @@ dow pmufw.elf
 con
 target -set -filter {name =~ "Cortex-A53 #0*"}
 rst -processor
-dow fsbl.elf
+dow zynqmp_fsbl.elf
 con
 # Add some delay after con to give it time to load fsbl
 after 1000

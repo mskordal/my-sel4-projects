@@ -102,20 +102,21 @@ using namespace llvm;
 // #define EVENT_5 EVENT_BRANCH_MISPREDICT
 
 // Use those events for profiling
-#define EVENT_0 EVENT_CACHE_L1D_MISS
-#define EVENT_1 EVENT_CACHE_L1I_MISS
-#define EVENT_2 EVENT_TLB_L1D_MISS
-#define EVENT_3 EVENT_TLB_L1I_MISS
-#define EVENT_4 EVENT_L2D_CACHE_REFILL
-#define EVENT_5 EVENT_L2D_CACHE_WB
+//#define EVENT_0 EVENT_CACHE_L1D_MISS
+//#define EVENT_1 EVENT_CACHE_L1I_MISS
+//#define EVENT_2 EVENT_TLB_L1D_MISS
+//#define EVENT_3 EVENT_TLB_L1I_MISS
+//#define EVENT_4 EVENT_L2D_CACHE_REFILL
+//#define EVENT_5 EVENT_L2D_CACHE_WB
 
 // Use those events for the attestation system
-// #define EVENT_0 EVENT_CACHE_L1D_MISS
-// #define EVENT_1 EVENT_EXECUTE_BRANCH_PREDICTABLE
-// #define EVENT_2 EVENT_BUS_ACCESS
-// #define EVENT_3 EVENT_MEMORY_READ
-// #define EVENT_4 EVENT_MEMORY_WRITE
-// #define EVENT_5 EVENT_EXECUTE_INSTRUCTION
+ #define EVENT_0 EVENT_CACHE_L1D_MISS
+ #define EVENT_1 EVENT_EXECUTE_BRANCH_PREDICTABLE
+ #define EVENT_2 EVENT_BUS_ACCESS
+ #define EVENT_3 EVENT_MEMORY_READ
+ #define EVENT_4 EVENT_MEMORY_WRITE
+ //#define EVENT_5 EVENT_BRANCH_MISPREDICT
+ #define EVENT_5 EVENT_EXECUTE_INSTRUCTION
 /**@}*/
 
 void injectAtFuncEntryBlock(BasicBlock *entryBblk, int funcID,
@@ -136,6 +137,7 @@ std::vector<Instruction *> getReturnInsts(Function *func);
 Function *createPrologueFunction(int funcID, Module &M, LLVMContext &context);
 Function* createEpilogueFunction(Module &M, LLVMContext &context);
 void createExternalFunctionDeclarations(Module &M, LLVMContext &context);
+int get_event_id(std::string event_name);
 #ifdef DEBUG_PRINT
 void insertPrint(IRBuilder<> &builder, std::string msg, Value *val, Module &M);
 #endif
@@ -143,7 +145,9 @@ void insertPrint(IRBuilder<> &builder, std::string msg, Value *val, Module &M);
 	std::vector<Instruction *> getTermInst(Function *func);
 #endif
 
-cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required);
+//cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required);
+cl::opt<std::string> func_name_ifname("functions-file", cl::desc("<functions input file>"), cl::Required);
+cl::opt<std::string> event_name_ifname("events-file", cl::desc("<events input file>"), cl::Required);
 
 enum eventIndices
 {
@@ -202,14 +206,22 @@ Function *declareFuncs[declareFuncsNum] = {nullptr};
 
 PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 {
-	std::ifstream *funcFile;
+	std::ifstream *func_name_ifstream;
+	std::ifstream *event_name_ifstream;
 	std::string line;
 
-	if (InputFilename.getNumOccurrences() > 0)
-		funcFile = new std::ifstream(InputFilename);
+	if (func_name_ifname.getNumOccurrences() > 0)
+		func_name_ifstream = new std::ifstream(func_name_ifname);
 	else
 	{
 		errs() << "List of functions to profile, was not provided";
+		exit(1);
+	}
+	if (event_name_ifname.getNumOccurrences() > 0)
+		event_name_ifstream = new std::ifstream(event_name_ifname);
+	else
+	{
+		errs() << "List of events to count, was not provided";
 		exit(1);
 	}
 	std::vector<std::string> funcNames;
@@ -233,25 +245,35 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	errs() << "USE_CLANG is disabled. Pass is built to be passed through opt\n";
 #endif	
 
-	while (getline(*funcFile, line))
+	// write the functions to be profiled
+	while (std::getline(*func_name_ifstream, line))
 	{
 		int delim_pos = line.find(" ");
 		funcNames.push_back(line.substr(0, delim_pos));
 		funcIds.push_back(
 			stoi(line.substr(delim_pos + 1, line.length() - delim_pos + 1)));
 	}
-
 	debug_errs("will now print functions got from functions.txt\n");
 	for (int i = 0; i < funcNames.size(); i++)
 	{
 		debug_errs(funcNames.at(i) << ": " << funcIds.at(i));
 	}
-	eventIDs[event0Index - 1] = EVENT_0;
-	eventIDs[event1Index - 1] = EVENT_1;
-	eventIDs[event2Index - 1] = EVENT_2;
-	eventIDs[event3Index - 1] = EVENT_3;
-	eventIDs[event4Index - 1] = EVENT_4;
-	eventIDs[event5Index - 1] = EVENT_5;
+
+	// Write the events to be counted
+	int i = 0;
+	while (std::getline(*event_name_ifstream, line))
+	{
+		eventIDs[i++] = get_event_id(line);
+		debug_errs(eventIDs[i-1] << " ");
+	}
+	debug_errs("\n");
+	
+	//eventIDs[event0Index - 1] = EVENT_0;
+	//eventIDs[event1Index - 1] = EVENT_1;
+	//eventIDs[event2Index - 1] = EVENT_2;
+	//eventIDs[event3Index - 1] = EVENT_3;
+	//eventIDs[event4Index - 1] = EVENT_4;
+	//eventIDs[event5Index - 1] = EVENT_5;
 
 	// Get the context of the module. Probably the Global Context.
 	LLVMContext &context = M.getContext();
@@ -440,6 +462,24 @@ void injectAtFuncEntryBlock(BasicBlock *entryBblk, int funcID,
 	Value *prologFuncArg[1] = {ConstantInt::get(context, APInt(32, funcID))};
 	builder.CreateCall(prologFunc, prologFuncArg);
 
+	// Create a call inst to sel4bench_reset_counters
+	builder.CreateCall(declareFuncs[sel4BenchRstCounts]);
+
+	// Create a call inst to sel4bench_start_counters/ 0x3F = 0b111111
+	Value *s4bsceArg[1] = {ConstantInt::get(context, APInt(64, 0x3F))};
+	builder.CreateCall(declareFuncs[sel4BenchStartCountsFunc], s4bsceArg);
+
+	CallInst *readPmcr = builder.CreateCall(
+		declareFuncs[sel4BenchPrivReadPmcrFunc]);
+
+	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
+	Value *cycleCounter = builder.CreateOr(readPmcr,
+		ConstantInt::get(context, APInt(32, 0x4)));
+
+	// Create a call inst to sel4bench_private_write_pmcr
+	Value *s4bpwpArg[1] = {cycleCounter};
+	builder.CreateCall(declareFuncs[sel4BenchPrivWritePmcrFunc],
+		s4bpwpArg);
 #ifdef DEBUG_PRINT
 	insertPrint(builder,  std::string(__func__) + " <<" + entryBblk->getParent()->getName().str() + ">>: END", nullptr, *entryBblk->getModule());
 #endif
@@ -619,7 +659,7 @@ BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 	builder.CreateStore(
 		ConstantInt::get(context, llvm::APInt(32, BRAM_ADDRESS)), hlsAddr36);
 	/**
-	 * Write value 0x11 to the control signals. This will fire-off the HLS
+	 * Write value 0x1 to the control signals. This will fire-off the HLS
 	 * function with the values currently written. This is done every time we
 	 * create this block
 	 */
@@ -631,7 +671,7 @@ BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 
 	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
 	Value *startBitSet = builder.CreateOr(currSigs,
-		ConstantInt::get(context, APInt(32, 0x11)));
+		ConstantInt::get(context, APInt(32, 0x1)));
 
 	// Create a load inst to read the address of the global pointer variable
 	LoadInst *hlsAddrCtrl = builder.CreateLoad(
@@ -669,24 +709,6 @@ BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 	debug_errs("\ninserted call to accprof_soft_top_func");
 #endif
 
-	// Create a call inst to sel4bench_reset_counters
-	builder.CreateCall(declareFuncs[sel4BenchRstCounts]);
-
-	// Create a call inst to sel4bench_start_counters/ 0x3F = 0b111111
-	Value *s4bsceArg[1] = {ConstantInt::get(context, APInt(64, 0x3F))};
-	builder.CreateCall(declareFuncs[sel4BenchStartCountsFunc], s4bsceArg);
-
-	CallInst *readPmcr = builder.CreateCall(
-		declareFuncs[sel4BenchPrivReadPmcrFunc]);
-
-	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
-	Value *cycleCounter = builder.CreateOr(readPmcr,
-		ConstantInt::get(context, APInt(32, 0x4)));
-
-	// Create a call inst to sel4bench_private_write_pmcr
-	Value *s4bpwpArg[1] = {cycleCounter};
-	builder.CreateCall(declareFuncs[sel4BenchPrivWritePmcrFunc],
-		s4bpwpArg);
 
 #ifdef DEBUG_PRINT
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
@@ -727,8 +749,9 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 	// address
 	Value *hlsAddr4 = builder.CreateConstInBoundsGEP1_64(
 		IntegerType::getInt32Ty(context), nodeDataLsAddr, 4);
+		//IntegerType::getInt32Ty(context), hlsAddrVar, 4);
 #ifdef DEBUG_PRINT
-	insertPrint(builder, "\tWill write 0 to: ", hlsAddr4, *bblk->getModule());
+	//insertPrint(builder, "\tWill write 0 to: ", hlsAddr4, *bblk->getModule());
 #endif
 #endif
 
@@ -835,7 +858,7 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 		ConstantInt::get(context, llvm::APInt(32, BRAM_ADDRESS)), hlsAddr36);
 
 	/**
-	 * Write value 0x11 to the control signals.
+	 * Write value 0x1 to the control signals.
 	 */
 
 	// Create a Load inst to load the control signals previously stored in
@@ -846,7 +869,7 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 
 	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
 	Value *startBitSet = builder.CreateOr(currSigs,
-		ConstantInt::get(context, APInt(32, 0x11)));
+		ConstantInt::get(context, APInt(32, 0x1)));
 
 	// Create a load inst to read the address of the global pointer variable
 	LoadInst *hlsAddrCtrl = builder.CreateLoad(hlsAddrVar->getValueType(),
@@ -1352,6 +1375,45 @@ void createExternalFunctionDeclarations(Module &M, LLVMContext &context)
 		}
 	}
 	debug_errs(__func__<< ": Exit");
+}
+
+
+int get_event_id(std::string event_name)
+{
+	if(event_name == "SW_INCR")					return 0x00;
+	if(event_name == "L1I_CACHE_REFILL")		return 0x01;
+	if(event_name == "L1I_TLB_REFILL")			return 0x02;
+	if(event_name == "L1D_CACHE_REFILL")		return 0x03;
+	if(event_name == "L1D_CACHE")				return 0x04;
+	if(event_name == "L1D_TLB_REFILL")			return 0x05;
+	if(event_name == "LD_RETIRED")				return 0x06;
+	if(event_name == "ST_RETIRED")				return 0x07;
+	if(event_name == "INST_RETIRED")			return 0x08;
+	if(event_name == "EXC_TAKEN")				return 0x09;
+	if(event_name == "EXC_RETURN")				return 0x0A;
+	if(event_name == "CID_WRITE_RETIRED")		return 0x0B;
+	if(event_name == "PC_WRITE_RETIRED")		return 0x0C;
+	if(event_name == "BR_IMMED_RETIRED")		return 0x0D;
+	if(event_name == "UNALIGNED_LDST_RETIRED")	return 0x0F;
+	if(event_name == "BR_MIS_PRED")				return 0x10;
+	if(event_name == "CPU_CYCLES")				return 0x11;
+	if(event_name == "BR_PRED")					return 0x12;
+	if(event_name == "MEM_ACCESS")				return 0x13;
+	if(event_name == "L1I_CACHE")				return 0x14;
+	if(event_name == "L1D_CACHE_WB")			return 0x15;
+	if(event_name == "L2D_CACHE")				return 0x16;
+	if(event_name == "L2D_CACHE_REFILL")		return 0x17;
+	if(event_name == "L2D_CACHE_WB")			return 0x18;
+	if(event_name == "BUS_ACCESS")				return 0x19;
+	if(event_name == "MEMORY_ERROR")			return 0x1A;
+	if(event_name == "BUS_CYCLES")				return 0x1D;
+	if(event_name == "CHAIN")					return 0x1E;
+	if(event_name == "BUS_ACCESS_LD")			return 0x60;
+	if(event_name == "BUS_ACCESS_ST")			return 0x61;
+	if(event_name == "BR_INDIRECT_SPEC")		return 0x7A;
+	if(event_name == "EXC_IRQ")					return 0x86;
+	if(event_name == "EXC_FIQ")					return 0x87;
+	return -1;
 }
 
 

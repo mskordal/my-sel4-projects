@@ -17,6 +17,8 @@ set(KernelArmExportPMUUser ON CACHE BOOL "" FORCE)
 
 SET(LLVMPass "" CACHE FILEPATH "The LLVM pass to instrument the app")
 SET(FunctionsFile "" CACHE FILEPATH "The text file with the functions the pass takes")
+SET(EventsFile "" CACHE FILEPATH "The text file with the events the pass takes")
+#SET(EventShiftsFile "" CACHE FILEPATH "The text file the path takes that shows how many bits to shift events for each function. Only used at attestation pass")
 
 find_package(seL4 REQUIRED)
 find_package(elfloader-tool REQUIRED)
@@ -24,6 +26,7 @@ find_package(musllibc REQUIRED)
 find_package(util_libs REQUIRED)
 find_package(seL4_libs REQUIRED)
 find_package(accprof_soft REQUIRED)
+find_package(sha256 REQUIRED)
 
 sel4_import_kernel()
 elfloader_import_project()
@@ -34,6 +37,7 @@ sel4_import_libsel4()
 util_libs_import_libraries()
 sel4_libs_import_libraries()
 accprof_soft_import_library()
+sha256_import_library()
 
 # add_executable(app src/app.c)
 
@@ -52,21 +56,26 @@ accprof_soft_import_library()
 add_executable(stream src/main.c)
 
 target_compile_options( stream PRIVATE 
-                        -O0
-                        -fplugin=${LLVMPass} -fpass-plugin=${LLVMPass} -mllvm ${FunctionsFile}
+						-O0
+                        -fplugin=${LLVMPass}
+                        -fpass-plugin=${LLVMPass}
+                        "SHELL:-mllvm --functions-file=${FunctionsFile}"
+                        "SHELL:-mllvm --events-file=${EventsFile}"
+                        #"SHELL:-mllvm --event-shifts-file=${EventShiftsFile}"
 )
 
 target_link_libraries(stream 
-	sel4
+    sel4
     muslc
     utils
     sel4muslcsys
-	sel4platsupport
+    sel4platsupport
     sel4utils
     sel4debug
-	sel4allocman
+    sel4allocman
     sel4bench
-	accprof_soft
+    accprof_soft
+    sha256
 )
 
 

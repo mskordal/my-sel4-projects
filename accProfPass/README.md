@@ -44,7 +44,10 @@ mkdir llvmpassbuild && cd llvmpassbuild
 # 4. -DUSE_HLS=ON : Injects instructions that rd/wr to HLS. Omit to instrument
 # instructions that rd/wr to AccProf-soft
 # 5. -DDEBUG_COMP_PRINT=ON : Prints debug messages during pass instrumentation
-cmake -DLT_LLVM_INSTALL_DIR=$LLVM_DIR ../accProfPass -DUSE_CLANG=ON -DUSE_HLS=ON -DDEBUG_COMP_PRINT=ON
+# 6. -DDEBUG_PRINT=ON : Injects printfs to the application. Useful for runtime
+# debugging. Avoid on actual runs since it increases instrumentation load.
+cmake -DLT_LLVM_INSTALL_DIR=$LLVM_DIR ../accProfPass -DUSE_CLANG=ON -DUSE_HLS=ON \
+-DDEBUG_COMP_PRINT=ON -DDEBUG_PRINT=ON
 
 # Actually build the pass. It will be libAccProf.so in our case.
 make
@@ -53,17 +56,22 @@ make
 $LLVM_DIR/bin/clang -O1 -S -emit-llvm ../myLlvmPass/app.c -o app.ll
 
 # Use the plugin at the IR file. First case is for instrumentations passes
-$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt. -passes=accprof app.ll -S -o derived.ll
+$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt. -passes=accprof \
+app.ll -S -o derived.ll
 
 # Second case is for analyses Passes
-$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt -passes=accprof -disable-output app.ll
+$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt -passes=accprof \
+ --functions-file=../accProfPass/functions.txt --events-file=../accProfPass/events.txt \
+ -disable-output app.ll
 
 # To directly inject the pass through clang without using opt, run the command
 # below. Also for some reason this works even with -O0
-$LLVM_DIR/bin/clang -O0 -fplugin=./libAccProf.so -fpass-plugin=./libAccProf.so -mllvm functions.txt -g ../accProfPass/app.c -o app
+$LLVM_DIR/bin/clang -O0 -fplugin=./libAccProf.so -fpass-plugin=./libAccProf.so
+ --functions-file=../accProfPass/functions.txt --events-file=../accProfPass/events.txt \
+-g ../accProfPass/app.c -o app
 
 ```
-# Pass functionality. Current version: 1.8
+# Pass functionality. Current version: 1.9
 The pass profiles a set of functions on user-specified events, using the
 hardware performance counters of the PMU results are stored as a conceptual
 format of a call-graph. The results of 6 events and cpu cycles are stored in
@@ -78,12 +86,13 @@ enables the output of debug messages at pass injection during the compilation of
 an application using the `debug_errs` macro.
 
 a53 cores which run on ZCU102 support up to 6 simultaneous events to count plus
-CPU cycles. To choose the appropriate events, look over the list of events set
-as defines, and then switch the defines `EVENT_0` to `EVENT_5` according to the
-events you want to measure. CPU cycle counting is always active. The functions
-that will be profiled are read from the `functions.txt` file. Each line in the
-file must contain a function name followed by a unique integer id 1-255
-separated by space. Check `prof-func-list.md` for examples.
+CPU cycles. To choose the appropriate events, look over the a53 ARM TRM for
+available events. Then create a file `events.txt` where every line is an event
+name exactly as written in the TRM. CPU cycle counting is always active. Check
+`event-list.md` for examples. The functions that will be profiled are read from
+the `functions.txt` file. Each line in the file must contain a function name
+followed by a unique integer id 1-255 separated by space. Check
+`prof-func-list.md` for examples.
 
 ## The pass performs the following actions to the application:
 1. At global scope, it defines a global pointer set to the virtual address
@@ -94,12 +103,11 @@ separated by space. Check `prof-func-list.md` for examples.
    are not initially visible by the application module, but the pass requires
    them to inject call instructions to those functions.
 2. In the beginning of the main function it initializes the performance counters
-   and sets them to specified `EVENT_0` to `EVENT_5` events.
+   and sets them according to `events.txt`.
 3. It defines a function called `fprof_prolog`. This function writes the
    profiling function ID and event IDs to the HLS. If `USE_HLS` is set, the pass
    spins on the idle bit of the hardware to make sure multiple writes will not
-   overlap and corrupt the data. It then resets the counters to start counting
-   from the beginnig of the function.
+   overlap and corrupt the data.
 4. It defines a function called `fprof_epilog`. This function takes the current
    7 values of the local variables defined in the prologue. It reads the 6
    counters and the cycle counter and adds each result with the corresponding
@@ -108,15 +116,22 @@ separated by space. Check `prof-func-list.md` for examples.
 The next steps apply for every function listed in `functions.txt`:
 1. In the function prologue the pass defines 7 local variables that to store
    counted events and then calls `fprof_prolog`.
-2. In the body of each function, the pass searches for calls to those same
+2. After `fprog_epilog` counters are started to begin counting.
+3. In the body of each function, the pass searches for calls to those same
    functions. Before each call instruction, the pass stores the current event
    values since when the callee will be called, the counters will be reset. Then
    right after the call, the pass adds the callee's results to the currently
    stored values of the caller and resets the counters to resume execution.
-3. The pass then searchs for return instructions in the profiling function and
+4. The pass then searchs for return instructions in the profiling function and
    before each return instruction found, it injects a call to `fprof_epilog`.
-4. For the software HLS mode, the pass prints the call graph in a csv format at
+5. For the software HLS mode, the pass prints the call graph in a csv format at
    epilogue of main.
+
+# Version 1.9 changes
+The pass now accepts an additional `events.txt` file with the event names to use.
+This allows to compile the sel4 project to count different events without the
+need to recompile the pass. Starting the counters has been moved out of
+`fprof_prolog` to avoid counting extra events due to returning from it.
 
 # Version 1.8 changes
 Prologue and epilogue instructions are put into two defined functions

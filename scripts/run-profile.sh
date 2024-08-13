@@ -4,12 +4,12 @@ total_execs=$1
 script_path=/home/mskordal/workspace/myRepos/my-sel4-projects/scripts
 of_prefix=res
 wait_exec_secs=1
-xilinx_settings_path=/home/mskordal/.local/Xilinx/Vivado/2022.2/settings64.sh
+xilinx_settings_path=/home/mskordal/.local/Xilinx/Vivado/2024.1/settings64.sh
 
 function reset_board 
 {
-	sudo usbrelay HURTM_1=1
-	sudo usbrelay HURTM_1=0
+	usbrelay HURTM_1=1
+	usbrelay HURTM_1=0
 }
 
 source ${xilinx_settings_path}
