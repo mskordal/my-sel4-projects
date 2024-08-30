@@ -1,4 +1,5 @@
-set bitStream /home/mskordal/workspace/myRepos/my-sel4-projects/accProf_wrapper.bit
+set bitStream [lindex $argv 0]
+
 open_hw_manager
 connect_hw_server -allow_non_jtag
 

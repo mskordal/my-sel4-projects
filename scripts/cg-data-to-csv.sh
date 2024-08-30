@@ -15,7 +15,12 @@ for txt_file in "$DIR"/*.txt; do
 		echo "No .txt files found in the directory."
 		exit 1
 	fi
-
+	 if [[ $(basename "$txt_file") == prof-meta* ]] || \
+		[[ $(basename "$txt_file") == keys* ]] || \
+		[[ $(basename "$txt_file") == event-shifts* ]]; then
+        # Skip to the next iteration if the filename starts with "keys" or "jaws"
+        continue
+    fi
     # Determine the corresponding .csv file name
     csv_file="${txt_file%.txt}.csv"
 	arr=($(awk '

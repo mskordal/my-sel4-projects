@@ -15,10 +15,16 @@ project(stream C ASM)
 # the usage of performance counters
 set(KernelArmExportPMUUser ON CACHE BOOL "" FORCE) 
 
-SET(LLVMPass "" CACHE FILEPATH "The LLVM pass to instrument the app")
-SET(FunctionsFile "" CACHE FILEPATH "The text file with the functions the pass takes")
-SET(EventsFile "" CACHE FILEPATH "The text file with the events the pass takes")
-#SET(EventShiftsFile "" CACHE FILEPATH "The text file the path takes that shows how many bits to shift events for each function. Only used at attestation pass")
+set(LLVMPass "" CACHE FILEPATH "The LLVM pass to instrument the app")
+set(FunctionsFile "" CACHE FILEPATH "The text file with the functions the pass takes")
+set(EventsFile "" CACHE FILEPATH "The text file with the events the pass takes")
+set(ProfMetaFile "" CACHE FILEPATH "The text file the pass takes that contains profiling metadata. Only used at profiling pass")
+set(EventShiftsFile "" CACHE FILEPATH "The text file the pass takes that shows how many bits to shift events for each function. Only used at attestation pass")
+set(KeysFile "" CACHE FILEPATH "The text file with the keys the pass takes. Only used at attestation pass")
+
+set(ProfMetaFlag "")
+set(EventShiftsFlag "")
+set(KeysFlag "")
 
 find_package(seL4 REQUIRED)
 find_package(elfloader-tool REQUIRED)
@@ -39,6 +45,15 @@ sel4_libs_import_libraries()
 accprof_soft_import_library()
 sha256_import_library()
 
+if(ProfMetaFile)
+    set(ProfMetaFlag "SHELL:-mllvm --prof-meta-file=${ProfMetaFile}")
+endif()
+if(EventShiftsFile)
+    set(EventShiftsFlag "SHELL:-mllvm --event-shifts-file=${EventShiftsFile}")
+endif()
+if(KeysFile)
+    set(KeysFlag "SHELL:-mllvm --keys-file=${KeysFile}")
+endif()
 # add_executable(app src/app.c)
 
 # # Include the pass in the app elf file
@@ -47,7 +62,6 @@ sha256_import_library()
 # target_link_libraries(app
 # 	sel4 muslc sel4muslcsys
 # 	sel4utils)
-
 
 # include(cpio)
 # MakeCPIO(archive.o "$<TARGET_FILE:app>")
@@ -61,7 +75,9 @@ target_compile_options( stream PRIVATE
                         -fpass-plugin=${LLVMPass}
                         "SHELL:-mllvm --functions-file=${FunctionsFile}"
                         "SHELL:-mllvm --events-file=${EventsFile}"
-                        #"SHELL:-mllvm --event-shifts-file=${EventShiftsFile}"
+                        "${ProfMetaFlag}"
+                        "${EventShiftsFlag}"
+                        "${KeysFlag}"
 )
 
 target_link_libraries(stream 

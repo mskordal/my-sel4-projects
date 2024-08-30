@@ -19,21 +19,21 @@ import sys
 import os
 import pprint
 
-EXPERIMENT_FILE_OFFSET = 2
+EXPERIMENT_FILE_OFFSET = 3
 A53_MAX_COUNTERS_NUM = 6
 
 KEYS_IDX = 0
 EVENT_SHIFTS_IDX = 1
 
-KEYS_FILE = "keys.csv"
-EVENT_SHIFTS_FILE = "event-shifts.csv"
+KEYS_FILE = "keys.txt"
+EVENT_SHIFTS_FILE = "event-shifts.txt"
 
 
 
 functions_num = 0
 events_num = 0
 execs_num = 0
-files = []
+csv_files = []
 
 
 def main():
@@ -49,7 +49,7 @@ def main():
 
 def init_globals_and_path(path: str):
 	"""
-	Goes to the path specified and (1) deletes previously generated keys.csv if
+	Goes to the path specified and (1) deletes previously generated keys.txt if
 	it exists (2) uses the evaluation files to populate functions_num,
 	events_num and execs_num used to later traverse the dataset. This function
 	assumes the directory contains only the csv files containing the event
@@ -65,7 +65,7 @@ def init_globals_and_path(path: str):
 	path: str
 		The path to evaluation files and where key file will be created
 	"""
-	global functions_num, events_num, execs_num, files
+	global functions_num, events_num, execs_num, csv_files
 	try:
 		os.remove(path + KEYS_FILE)
 	except FileNotFoundError:
@@ -75,11 +75,12 @@ def init_globals_and_path(path: str):
 	except FileNotFoundError:
 		pass
 	files = os.listdir(path)
-	execs_num = len(files) # each file is a different execution
-	csv_file = open(path + files[0], 'r')
+	csv_files = [file for file in files if file.endswith('.csv')]
+	execs_num = len(csv_files) # each file is a different execution
+	csv_file = open(path + csv_files[0], 'r')
 	functions_num = len(csv_file.readlines()) - 1
 	csv_file.close()
-	events_num = A53_MAX_COUNTERS_NUM + 1
+	events_num = A53_MAX_COUNTERS_NUM
 
 
 def init_dataset(path: str) -> list[list[list[int]]]:
@@ -102,7 +103,10 @@ def init_dataset(path: str) -> list[list[list[int]]]:
 	"""
 	dataset = [[[0 for _ in range(execs_num)] for _ in range(events_num)] for _ in range(functions_num)]
 	exec = 0
-	for file in files:
+	for file in csv_files:
+		# if not file.endswith('.csv'):
+			# continue
+		pprint.pprint(f'Parsing file: {file}')
 		csv_file = open(path + file, 'r')
 		csv_reader = csv.reader(csv_file, delimiter=',')
 		_ = next(csv_reader)
@@ -139,28 +143,36 @@ def create_lists(dataset: list[list[list[int]]]) -> list[list[int]]:
 	key_list = []
 	event_shifts_list = [[0 for _ in range(events_num)] for _ in range(functions_num)]
 	for func in range(functions_num): # Every function instance will generate 1 key
+		# print(f'f:{func}')
+		# print()
 		total_stable_bits_num = 0
 		total_stable_bits = 0
-		pprint.pprint(f'function {func}:')
+		# pprint.pprint(f'function {func}:')
 		for event in range(events_num):
+			# print(f'  e:{event}')
 			max_event_count = max(dataset[func][event])
 			if max_event_count == 0:
 				continue
 			min_event_count = min(dataset[func][event])
+			# print(f'    min:{hex(min_event_count)} - max:{hex(max_event_count)}')
 			xor_event_count = max_event_count ^ min_event_count
 			max_event_count_msb_pos = get_msb_pos(max_event_count)
 			xor_event_count_msb_pos = get_msb_pos(xor_event_count)
 			event_unstable_bits_num = xor_event_count_msb_pos + 1
 			event_stable_bits = max_event_count >> event_unstable_bits_num
+			# print(f'    shifts:{event_unstable_bits_num}')
 			event_shifts_list[func][event] = event_unstable_bits_num;
-			print(f'bits shifted for event {event}: {event_unstable_bits_num}')
 			event_stable_bits_lsl = event_stable_bits << total_stable_bits_num
 			total_stable_bits = total_stable_bits | event_stable_bits_lsl
 			total_stable_bits_num += max_event_count_msb_pos - xor_event_count_msb_pos
-			pprint.pprint(f'    {bin(max_event_count)}:{bin(min_event_count)}:{bin(xor_event_count)}:{bin(event_stable_bits)}')
-		key_list.append(total_stable_bits);
-		pprint.pprint(f'key (bin): {bin(total_stable_bits)}:')
-		pprint.pprint(f'key (dec): {total_stable_bits}:')
+			# pprint.pprint(f'    {bin(max_event_count)}:{bin(min_event_count)}:{bin(xor_event_count)}:{bin(event_stable_bits)}')
+			print(f'{hex(event_stable_bits)} - ', end='')
+			# print(f'total:{hex(total_stable_bits)}', end='')
+			# print()
+		key_list.append(hex(total_stable_bits));
+		# pprint.pprint(f'key (bin): {bin(total_stable_bits)}:')
+		# pprint.pprint(f'key (hex): {hex(total_stable_bits)}:')
+		print()
 	return [key_list, event_shifts_list]
 
 
@@ -177,15 +189,15 @@ def write_list_to_file(alist: list[any], path: str, output_file: str):
 	filename: str
 		The output file to write the list contents
 	"""
-	csv_file = open(path + output_file, 'w+')
-	csv_writer = csv.writer(csv_file)
+	file = open(path + output_file, 'w+')
 	for func in range(functions_num):
 		if type(alist[func]) == type([]):
-			csv_writer.writerow(alist[func])
+			line = ",".join(str(x) for x in alist[func])
+			file.write(f"{line}\n");
 		else:
-			csv_writer.writerow([alist[func]])
-			
-	csv_file.close()
+			file.write(f"{alist[func]}\n");
+
+	file.close()
 
 
 def get_msb_pos(n: int) -> int:

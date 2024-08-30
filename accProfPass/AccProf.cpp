@@ -9,37 +9,10 @@
 #include <iostream> //TODO: for debugging. Remove later
 #include <fstream>	//to read files with function names
 #include <string>
+#include <cstdlib>
 #include <filesystem>
 
-
 using namespace llvm;
-
-/**@{*/
-/** Uncomment to make the pass insert prints on important information */
-// #define DEBUG_PRINT
-
-/** Uncomment to make enable debug prints during compilation */
-// #define DEBUG_COMP_PRINT
-
-/**
- * Uncomment when using sel4bench. Benchmarks terminate on benchmark_finished
- * instead of return in their main
- */
-// #define USE_SEL4BENCH
-
-/**
- * Uncomment to make the pass inject instructions for HLS IP communication or
- * comment to inject instruction for the software implementation of the profiler
- */
-// #define USE_HLS
-
-/**
- * Uncomment to compile the pass to be injected during compilaction with clang.
- * Comment to be injected during compilation with opt.
- */
-// #define USE_CLANG
-
-/**@}*/
 
 #ifdef DEBUG_COMP_PRINT
 	#define debug_errs(str) do { errs() << str << "\n"; } while(0)
@@ -47,96 +20,29 @@ using namespace llvm;
 	#define debug_errs(str)
 #endif
 
-/**@{*/
-/** The physical address of the BRAM where the call graph is stored */
 #define BRAM_ADDRESS 0xa0040000
-/** The virtual address corresponding to the HLS IP. Mapped by the app */
-#define HLS_VIRT_ADDR 0x7000000 ///< virtual address for our test app
-// #define HLS_VIRT_ADDR 0x10013000 ///< virtual address for ipc benchmark for sel4bench
-// #define HLS_VIRT_ADDR 0x10014000 ///< virtual address for page-map benchmark for sel4bench
-/**@}*/
+#define HLS_VIRT_ADDR 0x10000000 ///< virtual address for our test app
 
-/**@{*/
-/** Events supported by a53 core used in ZCU102 MPSoC */
-#define EVENT_SOFTWARE_INCREMENT 0x00
-#define EVENT_CACHE_L1I_MISS 0x01
-#define EVENT_TLB_L1I_MISS 0x02
-#define EVENT_CACHE_L1D_MISS 0x03
-#define EVENT_CACHE_L1D_HIT 0x04
-#define EVENT_TLB_L1D_MISS 0x05
-#define EVENT_MEMORY_READ 0x06
-#define EVENT_MEMORY_WRITE 0x07
-#define EVENT_EXECUTE_INSTRUCTION 0x08
-#define EVENT_EXCEPTION 0x09
-#define EVENT_EXCEPTION_RETURN 0x0A
-#define EVENT_CONTEXTIDR_WRITE 0x0B
-#define EVENT_SOFTWARE_PC_CHANGE 0x0C
-#define EVENT_EXECUTE_BRANCH_IMM 0x0D
-#define EVENT_FUNCTION_RETURN 0x0E
-#define EVENT_MEMORY_ACCESS_UNALIGNED 0x0F
-#define EVENT_BRANCH_MISPREDICT 0x10
-#define EVENT_CCNT 0x11
-#define EVENT_EXECUTE_BRANCH_PREDICTABLE 0x12
-#define EVENT_MEMORY_ACCESS 0x13
-#define EVENT_L1I_CACHE 0x14
-#define EVENT_L1D_CACHE_WB 0x15
-#define EVENT_L2D_CACHE 0x16
-#define EVENT_L2D_CACHE_REFILL 0x17
-#define EVENT_L2D_CACHE_WB 0x18
-#define EVENT_BUS_ACCESS 0x19
-#define EVENT_MEMORY_ERROR 0x1A
-#define EVENT_INST_SPEC 0x1B
-#define EVENT_TTBR_WRITE_RETIRED 0x1C
-#define EVENT_BUS_CYCLES 0x1D
-#define EVENT_CHAIN 0x1E
-#define EVENT_L1D_CACHE_ALLOCATE 0x1F
-/**@}*/
+#define COUNTERS_NUM 6
 
-/**@{*/
-/** Configure which events to be used here */
-// #define EVENT_0 EVENT_CACHE_L1D_MISS
-// #define EVENT_1 EVENT_CACHE_L1D_HIT
-// #define EVENT_2 EVENT_TLB_L1D_MISS
-// #define EVENT_3 EVENT_MEMORY_READ
-// #define EVENT_4 EVENT_MEMORY_WRITE
-// #define EVENT_5 EVENT_BRANCH_MISPREDICT
 
-// Use those events for profiling
-//#define EVENT_0 EVENT_CACHE_L1D_MISS
-//#define EVENT_1 EVENT_CACHE_L1I_MISS
-//#define EVENT_2 EVENT_TLB_L1D_MISS
-//#define EVENT_3 EVENT_TLB_L1I_MISS
-//#define EVENT_4 EVENT_L2D_CACHE_REFILL
-//#define EVENT_5 EVENT_L2D_CACHE_WB
-
-// Use those events for the attestation system
- #define EVENT_0 EVENT_CACHE_L1D_MISS
- #define EVENT_1 EVENT_EXECUTE_BRANCH_PREDICTABLE
- #define EVENT_2 EVENT_BUS_ACCESS
- #define EVENT_3 EVENT_MEMORY_READ
- #define EVENT_4 EVENT_MEMORY_WRITE
- //#define EVENT_5 EVENT_BRANCH_MISPREDICT
- #define EVENT_5 EVENT_EXECUTE_INSTRUCTION
-/**@}*/
-
-void injectAtFuncEntryBlock(BasicBlock *entryBblk, int funcID,
-	Function *prologFunc, LLVMContext &context);
-BasicBlock *createSpinLockOnIdleBitBlock(BasicBlock *nextBblk, Function *func,
-	LLVMContext &context, Value **idleOff);
-BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
-	LLVMContext &context, int id);
-BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
-	LLVMContext &context);
-BasicBlock *writeGlobalsBeforeReturnBlock(Function *func, LLVMContext &context);
-void addGlobalsToLocalsAfterCallBlock(BasicBlock *thisBblk,
-	LLVMContext &context);
-void readCountersBeforeCallBlock(BasicBlock *thisBblk, LLVMContext &context);
-std::vector<Instruction *> getCallInsts(std::vector<std::string> &funcNames,
+void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
+	Function *prolog_func, LLVMContext &ctx);
+BasicBlock *create_spinlock_idle_bit_bblk(BasicBlock *nextBblk, Function *func,
+	LLVMContext &ctx, Value **is_idle_bit_0_val);
+BasicBlock *create_wr_fid_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
+	LLVMContext &ctx, int id);
+BasicBlock *create_wr_metrics_to_hls_bblk(AllocaInst *ctrl_sig_var,
+	Function *func, LLVMContext &ctx);
+BasicBlock *create_wr_metrics_to_globals_bblk(Function *func, LLVMContext &ctx);
+void inject_add_globals_to_locals(BasicBlock *bblk, LLVMContext &ctx);
+void inject_add_counters_to_locals(BasicBlock *bblk, LLVMContext &ctx);
+std::vector<Instruction *> get_call_instrs(std::vector<std::string> &func_names,
 	Function *func);
-std::vector<Instruction *> getReturnInsts(Function *func);
-Function *createPrologueFunction(int funcID, Module &M, LLVMContext &context);
-Function* createEpilogueFunction(Module &M, LLVMContext &context);
-void createExternalFunctionDeclarations(Module &M, LLVMContext &context);
+std::vector<Instruction *> get_ret_instrs(Function *func);
+Function *create_prolog_func(int funcID, Module &M, LLVMContext &ctx);
+Function* create_epilog_func(Module &M, LLVMContext &ctx);
+void create_extern_func_declarations(Module &M, LLVMContext &ctx);
 int get_event_id(std::string event_name);
 #ifdef DEBUG_PRINT
 void insertPrint(IRBuilder<> &builder, std::string msg, Value *val, Module &M);
@@ -146,48 +52,56 @@ void insertPrint(IRBuilder<> &builder, std::string msg, Value *val, Module &M);
 #endif
 
 //cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required);
-cl::opt<std::string> func_name_ifname("functions-file", cl::desc("<functions input file>"), cl::Required);
-cl::opt<std::string> event_name_ifname("events-file", cl::desc("<events input file>"), cl::Required);
+cl::opt<std::string> func_name_ifname("functions-file",
+	cl::desc("<functions input file>"), cl::Required);
+cl::opt<std::string> event_name_ifname("events-file",
+	cl::desc("<events input file>"), cl::Required);
+cl::opt<std::string> prof_meta_ifname("prof-meta-file",
+	cl::desc("<profiling metadata input file>"));
 
 enum eventIndices
 {
-	cpuCyclesIndex,
-	event0Index,
-	event1Index,
-	event2Index,
-	event3Index,
-	event4Index,
-	event5Index,
-	eventIndicesNum
+	CPU_CYCLES,
+	EVENT0,
+	EVENT1,
+	EVENT2,
+	EVENT3,
+	EVENT4,
+	EVENT5,
+	TOTAL_EVENTS
 };
 
-enum declareFuncs
+enum decl_funcs
 {
 #ifndef USE_HLS
 	accprofSoftTopFunc,
 	accprofSoftPrintFunc,
 #endif
-	sel4BenchInitFunc,
-	sel4BenchRstCounts,	
-	sel4BenchSetCountEventFunc,
-	sel4BenchStartCountsFunc,
-	sel4BenchPrivReadPmcrFunc,
-	sel4BenchPrivWritePmcrFunc,
-	sel4BenchGetCycleCountFunc,
-	sel4BenchGetCounterFunc,
-	declareFuncsNum
+	SEL4BENCH_INIT,
+	SEL4BENCH_RESET_COUNTERS,	
+	SEL4BENCH_SET_COUNT_EVENT,
+	SEL4BENCH_START_COUNTERS,
+	SEL4BENCH_PRIVATE_READ_PMCR,
+	SEL4BENCH_PRIVATE_WRITE_PMCR,
+	SEL4BENCH_GET_CYCLE_COUNT,
+	SEL4BENCH_GET_COUNTER,
+	TOTAL_DECL_FUNCS
 };
 
-int eventIDs[eventIndicesNum - 1];
+int event_pmu_codes[TOTAL_EVENTS - 1];
+int func_calls; ///< set to 1 on 1st prof exec. After that set to real num
 
-GlobalVariable *hlsAddrVar;
+GlobalVariable *hls_global_var;
 
 /** 64bit cpu cycles, 64bit event 0-5 */
-GlobalVariable *globalEventVars[eventIndicesNum]; ///< Globals: events0-5 & cpu
-AllocaInst *localEventVars[eventIndicesNum]; ///< Locals: events0-5 & cpu
+GlobalVariable *event_global_vars[TOTAL_EVENTS]; ///< Globals: events0-5 & cpu
+AllocaInst *event_local_vars[TOTAL_EVENTS]; ///< Locals: events0-5 & cpu
+//GlobalVariable *event_shift_glob_arr;
+//ArrayType* arr6_i32_typ;
 
 
-std::string declareFuncNames[declareFuncsNum] =
+
+std::string decl_func_names[TOTAL_DECL_FUNCS] =
 {
 #ifndef USE_HLS
 	"accprof_soft_top_func",
@@ -202,30 +116,74 @@ std::string declareFuncNames[declareFuncsNum] =
 	"sel4bench_get_cycle_count",
 	"sel4bench_get_counter"
 };
-Function *declareFuncs[declareFuncsNum] = {nullptr};
+Function *decl_funcs[TOTAL_DECL_FUNCS] = {nullptr};
+
+//StructType *attkey_typ;
 
 PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 {
 	std::ifstream *func_name_ifstream;
 	std::ifstream *event_name_ifstream;
+	std::ifstream *prof_meta_ifstream;
 	std::string line;
+	std::vector<std::string> func_names;
+	std::vector<int> func_ids;
+	//std::vector<uint32_t> event_shifts;
 
 	if (func_name_ifname.getNumOccurrences() > 0)
+	{
 		func_name_ifstream = new std::ifstream(func_name_ifname);
+		while (std::getline(*func_name_ifstream, line))
+		{
+			int delim_pos = line.find(" ");
+			func_names.push_back(line.substr(0, delim_pos));
+			func_ids.push_back(std::stoi(line.substr(delim_pos + 1,
+				line.length() - delim_pos + 1)));
+		}
+		errs() << "List of functions to be profiled:";
+		for (int i = 0; i < func_names.size(); i++)
+		{
+			errs() << func_names.at(i) << ": " << func_ids.at(i);
+		}
+	}
 	else
 	{
-		errs() << "List of functions to profile, was not provided";
+		errs() << "List of functions to profile was not provided";
 		exit(1);
 	}
 	if (event_name_ifname.getNumOccurrences() > 0)
+	{
 		event_name_ifstream = new std::ifstream(event_name_ifname);
+		int i = 0;
+		while (std::getline(*event_name_ifstream, line))
+		{
+			event_pmu_codes[i++] = get_event_id(line);
+		}
+		errs() << "List of events to be counted:";
+		for (i = 0; i < COUNTERS_NUM; i++)
+		{
+			errs() << "event 0: " << event_pmu_codes[i];
+		}
+	}
 	else
 	{
-		errs() << "List of events to count, was not provided";
+		errs() << "List of events to count was not provided";
 		exit(1);
 	}
-	std::vector<std::string> funcNames;
-	std::vector<int> funcIds;
+	if (prof_meta_ifname.getNumOccurrences() > 0)
+	{
+		prof_meta_ifstream = new std::ifstream(prof_meta_ifname);
+		std::getline(*prof_meta_ifstream, line);
+		func_calls = std::stoi(line);
+		errs() << "List of profling metadata:";
+		errs() << "func_calls: " << func_calls;
+	}
+	else
+	{
+		func_calls = 1;
+		errs() << "List of profling metadata was not provided";
+		errs() << "func_calls: 1";
+	}
 
 #ifdef DEBUG_PRINT
 	errs() << "DEBUG_PRINT is enabled. printf calls will be instrumented\n";
@@ -240,88 +198,69 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	errs() << "USE_HLS is disabled. pass will rd/wr to AccProf-soft\n";
 #endif	
 #ifdef USE_CLANG
-	errs() << "USE_CLANG is enabled. Pass is built to be passed through clang\n";
+	errs() << "USE_CLANG is enabled. Pass is used with clang\n";
 #else
-	errs() << "USE_CLANG is disabled. Pass is built to be passed through opt\n";
-#endif	
-
-	// write the functions to be profiled
-	while (std::getline(*func_name_ifstream, line))
-	{
-		int delim_pos = line.find(" ");
-		funcNames.push_back(line.substr(0, delim_pos));
-		funcIds.push_back(
-			stoi(line.substr(delim_pos + 1, line.length() - delim_pos + 1)));
-	}
-	debug_errs("will now print functions got from functions.txt\n");
-	for (int i = 0; i < funcNames.size(); i++)
-	{
-		debug_errs(funcNames.at(i) << ": " << funcIds.at(i));
-	}
-
-	// Write the events to be counted
-	int i = 0;
-	while (std::getline(*event_name_ifstream, line))
-	{
-		eventIDs[i++] = get_event_id(line);
-		debug_errs(eventIDs[i-1] << " ");
-	}
-	debug_errs("\n");
-	
-	//eventIDs[event0Index - 1] = EVENT_0;
-	//eventIDs[event1Index - 1] = EVENT_1;
-	//eventIDs[event2Index - 1] = EVENT_2;
-	//eventIDs[event3Index - 1] = EVENT_3;
-	//eventIDs[event4Index - 1] = EVENT_4;
-	//eventIDs[event5Index - 1] = EVENT_5;
-
+	errs() << "USE_CLANG is disabled. Pass is used with opt\n";
+#endif
 	// Get the context of the module. Probably the Global Context.
-	LLVMContext &context = M.getContext();
+	LLVMContext &ctx = M.getContext();
 	
-	/**
-	 * Create the external declarations of functions.
-	 */
-	createExternalFunctionDeclarations(M, context);
+	create_extern_func_declarations(M, ctx);
 	
-	Type *Int64PtrTy = Type::getInt64PtrTy(context);
+	Type *i64_ptr_typ = Type::getInt64PtrTy(ctx);
 
-	std::string fullPathFilename = M.getName().str();
-	std::string filename = std::filesystem::path(fullPathFilename).filename().
-		replace_extension("").string();
-	debug_errs("filename of Module: " << filename << "\n");
+	std::string absolut_filename = M.getName().str();
+	std::string src_filename = std::filesystem::path(absolut_filename).
+		filename().replace_extension("").string();
+	debug_errs("filename of Module: " << src_filename << "\n");
 	// Create a global ptr var with external linkage and a null initializer.
-	hlsAddrVar = new GlobalVariable(M, Int64PtrTy, false,
-		GlobalValue::ExternalLinkage, nullptr, filename + "-hlsptr");
+	hls_global_var = new GlobalVariable(M, i64_ptr_typ, false,
+		GlobalValue::ExternalLinkage, nullptr, src_filename + "-hlsptr");
 	// Create a constant 64-bit integer value.
 	// APInt is an object that represents an integer of specified bitwidth
-	ConstantInt *Int64Val = ConstantInt::get(context, APInt(64, HLS_VIRT_ADDR));
+	ConstantInt *Int64Val = ConstantInt::get(ctx, APInt(64, HLS_VIRT_ADDR));
 	// Convert the integer value to a pointer. Basically a typecast
-	Constant *PtrVal = ConstantExpr::getIntToPtr(Int64Val, Int64PtrTy);
+	Constant *PtrVal = ConstantExpr::getIntToPtr(Int64Val, i64_ptr_typ);
 	// Align global variable to 8 bytes
-	hlsAddrVar->setAlignment(Align(8));
+	hls_global_var->setAlignment(Align(8));
 	// Set the initial value of the global variable. Overwrites if existing
-	hlsAddrVar->setInitializer(PtrVal);
+	hls_global_var->setInitializer(PtrVal);
+
+	// Initialize a random global array of 6 elements for event shifts
+	//arr6_i32_typ = ArrayType::get(Type::getInt32Ty(ctx), COUNTERS_NUM);
+	//Constant *event_shift_arr_init = ConstantArray::get(arr6_i32_typ,
+		//{
+			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
+			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
+			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
+			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
+			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
+			//ConstantInt::get(ctx, APInt(32, rand() % 8))
+		//});
+	//event_shift_glob_arr = new GlobalVariable(M, arr6_i32_typ, true,
+		//GlobalValue::ExternalLinkage, event_shift_arr_init, "event_shifts");
+	//event_shift_glob_arr->setAlignment(Align(4));
 
 	// Create the global variables for the cpu cycles and the 6 events
-	for (int i = 0; i < eventIndicesNum; i++)
+	for (int i = 0; i < TOTAL_EVENTS; i++)
 	{
-		globalEventVars[i] = new GlobalVariable(M, Type::getInt64Ty(context),
+		event_global_vars[i] = new GlobalVariable(M, Type::getInt64Ty(ctx),
 			false, GlobalValue::ExternalLinkage, nullptr,
-			filename + "-ev" + std::to_string(i));
-		globalEventVars[i]->setDSOLocal(true);
-		globalEventVars[i]->setAlignment(Align(8));
-		globalEventVars[i]->setInitializer(
-			ConstantInt::get(context, APInt(64, 0)));
+			src_filename + "-ev" + std::to_string(i));
+		event_global_vars[i]->setDSOLocal(true);
+		event_global_vars[i]->setAlignment(Align(8));
+		event_global_vars[i]->setInitializer(
+			ConstantInt::get(ctx, APInt(64, 0)));
 	}
-	Function* prologFunc = createPrologueFunction(0, M, context);
-	Function* epilogFunc = createEpilogueFunction(M, context);
+	Function* prolog_func = create_prolog_func(0, M, ctx);
+	Function* epilog_func = create_epilog_func(M, ctx);
 
-	Function *mainFunc = M.getFunction("main");
+	Function *main_func = M.getFunction("main");
 
 	// In main function initialize counters and set them to specific events 
-	if(mainFunc)
+	if(main_func)
 	{
-		BasicBlock *mainFirstBblk = &mainFunc->getEntryBlock();
+		BasicBlock *mainFirstBblk = &main_func->getEntryBlock();
 
 		IRBuilder<> mainBuilder(mainFirstBblk, mainFirstBblk->begin());
 
@@ -329,87 +268,84 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 		insertPrint(mainBuilder, "HLS virt address: ", Int64Val,
 			*mainFirstBblk->getModule());
 #endif
-		mainBuilder.CreateCall(declareFuncs[sel4BenchInitFunc]);
+		mainBuilder.CreateCall(decl_funcs[SEL4BENCH_INIT]);
 
 		// Create 6 call instructions to sel4bench_set_count_event
 		for (int i = 0; i < 6; ++i)
 		{
 			Value *s4bsceArgs[2] =
 			{
-				ConstantInt::get(context, APInt(64, i)),
-				ConstantInt::get(context, APInt(64, eventIDs[i]))
+				ConstantInt::get(ctx, APInt(64, i)),
+				ConstantInt::get(ctx, APInt(64, event_pmu_codes[i]))
 			};
-			mainBuilder.CreateCall(declareFuncs[sel4BenchSetCountEventFunc],
+			mainBuilder.CreateCall(decl_funcs[SEL4BENCH_SET_COUNT_EVENT],
 				s4bsceArgs);
 		}
 		debug_errs("main prologue instrumentation done!!");
 	}
 	else
 		debug_errs("This module has no main!");
-	for (int i = 0; i < funcNames.size(); ++i)
+	for (int i = 0; i < func_names.size(); ++i)
 	{
-		Value *idleOff;
+		Value *is_idle_bit_0_val;
 
 		// get function the function
-		Function *func = M.getFunction(funcNames.at(i));
+		Function *func = M.getFunction(func_names.at(i));
 
 		// function may not exist or may only be declared in this module. In
 		// that case we don't perform any instrumentation
 		if(!func) continue;
 		if(func->empty()) continue;
 
-		BasicBlock *firstBblk = &func->getEntryBlock();
+		BasicBlock *entry_bblk = &func->getEntryBlock();
 
-		injectAtFuncEntryBlock(&func->getEntryBlock(), funcIds.at(i),
-			prologFunc, context);
+		inject_local_allocs_rst_counters(entry_bblk, func_ids.at(i),
+			prolog_func, ctx);
 
-		std::vector<Instruction *> callInsts = getCallInsts(funcNames, func);
+		std::vector<Instruction*> call_instrs = get_call_instrs(func_names,
+			func);
 
 		// For every call instructions split blocks. In the end bblk is a block
 		// that contains just the call instruction and nextBblk is the block
 		// that bblk branches to at the end
-		for (Instruction *instr : callInsts)
+		for (Instruction *call_instr : call_instrs)
 		{
-			BasicBlock *bblk = instr->getParent();
-			// Instruction *firstInstr = bblk->getFirstNonPHI();
-			// if (firstInstr != instr)
-			if (&(bblk->front()) != instr)
-				bblk = SplitBlock(bblk, instr);
-
-			BasicBlock *nextBblk = SplitBlock(bblk,
-				instr->getNextNonDebugInstruction());
-
-			readCountersBeforeCallBlock(bblk, context);
-
-			addGlobalsToLocalsAfterCallBlock(nextBblk, context);
+			BasicBlock *call_instr_bblk = call_instr->getParent();
+			if (&(call_instr_bblk->front()) != call_instr)
+				call_instr_bblk = SplitBlock(call_instr_bblk, call_instr);
+			BasicBlock *after_call_instr_bblk = SplitBlock(call_instr_bblk,
+				call_instr->getNextNonDebugInstruction());
+			inject_add_counters_to_locals(call_instr_bblk, ctx);
+			inject_add_globals_to_locals(after_call_instr_bblk, ctx);
 		}
-		std::vector<Instruction *> retInsts = getReturnInsts(func);
-		for (Instruction *instr : retInsts)
+		std::vector<Instruction *> ret_instrs = get_ret_instrs(func);
+		for (Instruction *ret_instr : ret_instrs)
 		{
-			Value *epilogFuncArgs[eventIndicesNum] =
+			Value *epilog_func_args[TOTAL_EVENTS] =
 			{
-				localEventVars[cpuCyclesIndex],
-				localEventVars[event0Index],
-				localEventVars[event1Index],
-				localEventVars[event2Index],
-				localEventVars[event3Index],
-				localEventVars[event4Index],
-				localEventVars[event5Index]
+				event_local_vars[CPU_CYCLES],
+				event_local_vars[EVENT0],
+				event_local_vars[EVENT1],
+				event_local_vars[EVENT2],
+				event_local_vars[EVENT3],
+				event_local_vars[EVENT4],
+				event_local_vars[EVENT5]
 			};
-			CallInst *epilogFuncCi = CallInst::Create(epilogFunc->getFunctionType(),
-				epilogFunc, epilogFuncArgs, "accprof_epilog");
-			epilogFuncCi->insertBefore(instr);
+			CallInst *epilog_func_call_instr = CallInst::Create(
+				epilog_func->getFunctionType(), epilog_func, epilog_func_args,
+				"accprof_epilog");
+			epilog_func_call_instr->insertBefore(ret_instr);
 		}
-		debug_errs(funcNames.at(i) << " instrumentation done!!");
+		debug_errs(func_names.at(i) << " instrumentation done!!");
 	}
-	if(mainFunc)
+	if(main_func)
 	{
 	// If we are on software mode, print results to console
 #ifndef USE_HLS
 #ifdef USE_SEL4BENCH
-		std::vector<Instruction *> retInsts = getTermInst(mainFunc);
+		std::vector<Instruction *> retInsts = getTermInst(main_func);
 #else
-		std::vector<Instruction *> retInsts = getReturnInsts(mainFunc);
+		std::vector<Instruction *> retInsts = get_ret_instrs(main_func);
 #endif
 		for (Instruction *instr : retInsts)
 		{
@@ -419,9 +355,10 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 				bblk = SplitBlock(bblk, instr);
 			
 			IRBuilder<> endBuilder(bblk, bblk->begin());
-			endBuilder.CreateCall(declareFuncs[accprofSoftPrintFunc]);
+			endBuilder.CreateCall(decl_funcs[accprofSoftPrintFunc]);
 		}
-		debug_errs(declareFuncNames[accprofSoftPrintFunc] << " instrumentation done!!");
+		debug_errs(decl_func_names[accprofSoftPrintFunc]
+			<< " instrumentation done!!");
 #endif
 	}
 
@@ -432,58 +369,53 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
  * Injects instructions at the prologue of a function that is being profiled. It
  * allocates 7 local variables to stored counted events and inserts a call to a
  * function that writes to hardware.
- * @param entryBblk The entry block of the function we add the instructions
+ * @param bblk The entry block of the function we add the instructions
  * @param funcID The id of the Function we want to write to the hardware
- * @param prologFunc The function we want to call in that block
- * @param context The context of current Module
+ * @param prolog_func The function we want to call in that block
+ * @param ctx The context of current Module
  * @return The block created or thisBBlk if not null
  */
-void injectAtFuncEntryBlock(BasicBlock *entryBblk, int funcID,
-	Function *prologFunc, LLVMContext &context)
+void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
+	Function *prolog_func, LLVMContext &ctx)
 {
-	debug_errs(__func__<< ": " << entryBblk->getParent()->getName().str() << ": Enter");
+	debug_errs(__func__<< ": " << bblk->getParent()->getName().str()
+		<< ": Enter");
 
-	IRBuilder<> builder(entryBblk, entryBblk->begin());
+	IRBuilder<> builder(bblk, bblk->begin());
 
 #ifdef DEBUG_PRINT
-	insertPrint(builder,  std::string(__func__) + " <<" + entryBblk->getParent()->getName().str() + ">>: START", nullptr, *entryBblk->getModule());
+	insertPrint(builder,  std::string(__func__) + " <<" +
+		bblk->getParent()->getName().str() + ">>: START", nullptr,
+		*bblk->getModule());
 #endif
-
-	// Create 7 64bit Mem Alloc Insts for local vars to store cpu cycles and 6
-	// events for this function.
-	for (int i = 0; i < eventIndicesNum; ++i)
+	// Allocate local vars for events and call prolog function
+	for (int i = 0; i < TOTAL_EVENTS; ++i)
 	{
-		localEventVars[i] = builder.CreateAlloca(
-			IntegerType::getInt64Ty(context));
-		builder.CreateStore( ConstantInt::get(context, llvm::APInt(64, 0)),
-			localEventVars[i]);
+		event_local_vars[i] = builder.CreateAlloca(
+			IntegerType::getInt64Ty(ctx));
+		builder.CreateStore( ConstantInt::get(ctx, llvm::APInt(64, 0)),
+			event_local_vars[i]);
 	}
+	Value *prolog_funcArg[1] = {ConstantInt::get(ctx, APInt(32, func_id))};
+	builder.CreateCall(prolog_func, prolog_funcArg);
 
-	Value *prologFuncArg[1] = {ConstantInt::get(context, APInt(32, funcID))};
-	builder.CreateCall(prologFunc, prologFuncArg);
-
-	// Create a call inst to sel4bench_reset_counters
-	builder.CreateCall(declareFuncs[sel4BenchRstCounts]);
-
-	// Create a call inst to sel4bench_start_counters/ 0x3F = 0b111111
-	Value *s4bsceArg[1] = {ConstantInt::get(context, APInt(64, 0x3F))};
-	builder.CreateCall(declareFuncs[sel4BenchStartCountsFunc], s4bsceArg);
-
-	CallInst *readPmcr = builder.CreateCall(
-		declareFuncs[sel4BenchPrivReadPmcrFunc]);
-
-	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
-	Value *cycleCounter = builder.CreateOr(readPmcr,
-		ConstantInt::get(context, APInt(32, 0x4)));
-
-	// Create a call inst to sel4bench_private_write_pmcr
-	Value *s4bpwpArg[1] = {cycleCounter};
-	builder.CreateCall(declareFuncs[sel4BenchPrivWritePmcrFunc],
-		s4bpwpArg);
+	// reset/start counters
+	builder.CreateCall(decl_funcs[SEL4BENCH_RESET_COUNTERS]);
+	Value *start_counter_arg[1] = {ConstantInt::get(ctx, APInt(64, 0x3F))};
+	builder.CreateCall(decl_funcs[SEL4BENCH_START_COUNTERS], start_counter_arg);
+	CallInst *rd_pmcr_val = builder.CreateCall(
+		decl_funcs[SEL4BENCH_PRIVATE_READ_PMCR]);
+	Value *rst_pmcr_val = builder.CreateOr(rd_pmcr_val,
+		ConstantInt::get(ctx, APInt(32, 0x4)));
+	Value *wr_pmcr_arg[1] = {rst_pmcr_val};
+	builder.CreateCall(decl_funcs[SEL4BENCH_PRIVATE_WRITE_PMCR], wr_pmcr_arg);
 #ifdef DEBUG_PRINT
-	insertPrint(builder,  std::string(__func__) + " <<" + entryBblk->getParent()->getName().str() + ">>: END", nullptr, *entryBblk->getModule());
+	insertPrint(builder,  std::string(__func__) + " <<" +
+		bblk->getParent()->getName().str() + ">>: END", nullptr,
+		*bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << entryBblk->getParent()->getName().str() << ": Enter");
+	debug_errs(__func__<< ": " << bblk->getParent()->getName().str()
+		<< ": Enter");
 
 }
 
@@ -493,62 +425,42 @@ void injectAtFuncEntryBlock(BasicBlock *entryBblk, int funcID,
  * IP. Must keep spinning until the IP is idle.
  * @param nextBblk We insert our new block before that block
  * @param func The function upon we build the block
- * @param context The context of current Module
+ * @param ctx The context of current Module
  * @return The block created
  */
-BasicBlock *createSpinLockOnIdleBitBlock(AllocaInst *ctrlSigVar, Function *func,
-	LLVMContext &context, Value **idleOff)
+BasicBlock *create_spinlock_idle_bit_bblk(AllocaInst *ctrl_sig_var,
+	Function *func, LLVMContext &ctx, Value **is_idle_bit_0_val)
 {
 	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
-
-	BasicBlock *bblk = BasicBlock::Create(context, "", func);
+	BasicBlock *bblk = BasicBlock::Create(ctx, "", func);
 	IRBuilder<> builder(bblk, bblk->begin());
-
 #ifdef DEBUG_PRINT
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
 		+ ">>: START", nullptr, *bblk->getModule());
 #endif
 	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
-
 #ifdef USE_HLS
-	// Create a load inst to read the address of the global pointer variable
-	LoadInst *hlsAddrCtrl = builder.CreateLoad(hlsAddrVar->getValueType(),
-		hlsAddrVar);
-	// Create a getelemntptr inst to get the adress of the 0th index of the
-	// address
-	Value *hlsAddr0 = builder.CreateConstInBoundsGEP1_64(
-		IntegerType::getInt32Ty(context), hlsAddrCtrl, 0);
-
-	// Create a Load inst to load the number in index 0 from the hls address
-	// to the Control signals
-	LoadInst *hlsAddr0val = builder.CreateAlignedLoad(
-		IntegerType::getInt32Ty(context), hlsAddr0, MaybeAlign(4));
-
-	// Create a Store inst to store the number to currCtrlSigs
-	builder.CreateStore(hlsAddr0val, ctrlSigVar);
-
-	// Create an And Op to isolate the idle bit from the ctrl signals
-	Value *idleBit = builder.CreateAnd(hlsAddr0val, 4);
-
-	// Create a Compare Not Equal inst to check if the Idle Bit is not 0.
-	// A true result means the bit is idle so we need to escape the loop
-	Value *idleOn = builder.CreateICmpNE(idleBit,
-		ConstantInt::get(context, APInt(32, 0)));
-
-	// Create an XOR inst to compare idleOn with 'true' to reverse the
-	// boolean value of previous compare and assign result to idleOff
-	*idleOff = builder.CreateXor(idleOn, ConstantInt::getTrue(context));
-#else //This case works for both the software case or if not using any case
-	// We want idleOff to be false so that we never loop when not using HLS
-	*idleOff = builder.CreateXor(ConstantInt::getTrue(context),
-		ConstantInt::getTrue(context));
+	LoadInst *hls_base_addr = builder.CreateLoad(hls_global_var->getValueType(),
+		hls_global_var);
+	Value *hls_ctrl_addr = builder.CreateConstInBoundsGEP1_64(
+		IntegerType::getInt32Ty(ctx), hls_base_addr, 0);
+	LoadInst *hls_ctrl_val = builder.CreateAlignedLoad(
+		IntegerType::getInt32Ty(ctx), hls_ctrl_addr, MaybeAlign(4));
+	builder.CreateStore(hls_ctrl_val, ctrl_sig_var);
+	Value *idle_bit_val = builder.CreateAnd(hls_ctrl_val, 4);
+	Value *is_idle_bit_1_val = builder.CreateICmpNE(idle_bit_val,
+		ConstantInt::get(ctx, APInt(32, 0)));
+	*is_idle_bit_0_val = builder.CreateXor(is_idle_bit_1_val,
+		ConstantInt::getTrue(ctx));
+#else
+	*is_idle_bit_0_val = builder.CreateXor(ConstantInt::getTrue(ctx),
+		ConstantInt::getTrue(ctx));
 #endif
 #ifdef DEBUG_PRINT
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
 		+ ">>: END", nullptr, *bblk->getModule());
 #endif
 	debug_errs("in " << __func__  <<": Exit");
-
 	return bblk;
 }
 
@@ -558,19 +470,19 @@ BasicBlock *createSpinLockOnIdleBitBlock(AllocaInst *ctrlSigVar, Function *func,
  * id. If it is 0, we just returned from a function.
  * @param nextBblk We insert our new block before that block
  * @param func The function upon we build the block
- * @param context The context of current Module
+ * @param ctx The context of current Module
  * @param globVar The global variable that contains the HLS virtual address
  * @param id The function id (positive) or 0
  * @return The block created
  */
-BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
-	LLVMContext &context, int id)
+BasicBlock *create_wr_fid_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
+	LLVMContext &ctx, int id)
 {
 
-	int nodeDataLS;
-	int nodeDataMS;
+	int event_ids_ls;
+	int event_ids_ms;
 
-	BasicBlock *bblk = BasicBlock::Create(context, "", func);
+	BasicBlock *bblk = BasicBlock::Create(ctx, "", func);
 	IRBuilder<> builder(bblk, bblk->begin());
 
 #ifdef DEBUG_PRINT
@@ -580,132 +492,85 @@ BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
 
 #ifdef USE_HLS
-	// Create a load inst to read the address of the global pointer variable
-	LoadInst *nodeDataLsAddr = builder.CreateLoad(
-		hlsAddrVar->getValueType(), hlsAddrVar);
-
-	// Create a getelemntptr inst to get the adress of the 4th index of the
-	// address
-	Value *hlsAddr4 = builder.CreateConstInBoundsGEP1_64(
-		IntegerType::getInt32Ty(context), nodeDataLsAddr, 4);
+	// Write the first 3 event IDs and func ID to the corresponding HLS address
+	LoadInst *hls_base_addr = builder.CreateLoad(
+		hls_global_var->getValueType(), hls_global_var);
+	Value *hls_id_ls_addr = builder.CreateConstInBoundsGEP1_64(
+		IntegerType::getInt32Ty(ctx), hls_base_addr, 4);
 #endif
-	Argument *funcIdArg = &*func->arg_begin();
-	nodeDataLS = 0;
-	nodeDataLS |= (eventIDs[event0Index - 1] << 8);
-	nodeDataLS |= (eventIDs[event1Index - 1] << 16);
-	nodeDataLS |= (eventIDs[event2Index - 1] << 24);
-
-	// Create a Store inst to store the function ID to the 4th index from
-	// the HLS base address which is the id parameter
-	ConstantInt *eventsLsInt =
-		ConstantInt::get(context, llvm::APInt(32, nodeDataLS));
-
-	Value *nodatDataLsInt = builder.CreateOr(funcIdArg, eventsLsInt);
-
+	Argument *func_id_arg = &*func->arg_begin();
+	event_ids_ls = 0;
+	event_ids_ls |= (event_pmu_codes[EVENT0 - 1] << 8);
+	event_ids_ls |= (event_pmu_codes[EVENT1 - 1] << 16);
+	event_ids_ls |= (event_pmu_codes[EVENT2 - 1] << 24);
+	ConstantInt *event_ids_ls_val =
+		ConstantInt::get(ctx, llvm::APInt(32, event_ids_ls));
+	Value *ids_ls_val = builder.CreateOr(func_id_arg, event_ids_ls_val);
 #ifdef DEBUG_PRINT
-	insertPrint(builder, "\tnodeDataLS: ", nodatDataLsInt, *bblk->getModule());
+	insertPrint(builder, "\tevent_ids_ls: ", ids_ls_val, *bblk->getModule());
 #endif
-
 #ifdef USE_HLS
-	builder.CreateStore(nodatDataLsInt, hlsAddr4);
-	// Create a load inst to read the address of the global pointer variable
-	LoadInst *nodeDataMsAddr = builder.CreateLoad(
-		hlsAddrVar->getValueType(), hlsAddrVar);
+	builder.CreateStore(ids_ls_val, hls_id_ls_addr);
 
-	// Create a getelemntptr inst to get the adress of the 6th index of the
-	// address
-	Value *hlsAddr6 = builder.CreateConstInBoundsGEP1_64(
-		IntegerType::getInt32Ty(context), nodeDataMsAddr, 6);
+	// Write the last 3 event IDs to the corresponding HLS address
+	hls_base_addr = builder.CreateLoad(
+		hls_global_var->getValueType(), hls_global_var);
+	Value *hls_id_ms_addr = builder.CreateConstInBoundsGEP1_64(
+		IntegerType::getInt32Ty(ctx), hls_base_addr, 6);
 #endif
+	event_ids_ms = 0;
+	event_ids_ms |= (event_pmu_codes[EVENT3 - 1] << 8);
+	event_ids_ms |= (event_pmu_codes[EVENT4 - 1] << 16);
+	event_ids_ms |= (event_pmu_codes[EVENT5 - 1] << 24);
+	ConstantInt *ids_ms_val =
+		ConstantInt::get(ctx, llvm::APInt(32, event_ids_ms));
+#ifdef USE_HLS
+	builder.CreateStore(ids_ms_val, hls_id_ms_addr);
 
-	nodeDataMS = 0;
-	nodeDataMS |= (eventIDs[event3Index - 1] << 8);
-	nodeDataMS |= (eventIDs[event4Index - 1] << 16);
-	nodeDataMS |= (eventIDs[event5Index - 1] << 24);
-
-	// Create a Store inst to store the bram address to the 6th index from
-	// the HLS base address which is the bram parameter
-	ConstantInt *nodatDataMsInt =
-		ConstantInt::get(context, llvm::APInt(32, nodeDataMS));
-
+	// Write BRAM address to HLS
+	hls_base_addr = builder.CreateLoad(hls_global_var->getValueType(),
+		hls_global_var);
+	Value *hls_bram_addr = builder.CreateConstInBoundsGEP1_64(
+		IntegerType::getInt32Ty(ctx), hls_base_addr, 36);
 #ifdef DEBUG_PRINT
-	// insertPrint(builder, "\tnodeDataMS: ", nodatDataMsInt, *bblk->getModule());
+	insertPrint(builder, "\thls bram: ", hls_bram_addr, *bblk->getModule());
 #endif
+	builder.CreateStore(ConstantInt::get(ctx, llvm::APInt(32, BRAM_ADDRESS)),
+		hls_bram_addr);
 
-#ifdef USE_HLS
-	builder.CreateStore(nodatDataMsInt, hlsAddr6);
-
-	/**
-	 * Write the bram address to the corresponding HLS address. This is done
-	 * every time we create this block
-	 */
-
-	// Create a load inst to read the address of the global pointer variable
-	LoadInst *hlsAddrBramAddr = builder.CreateLoad(
-		hlsAddrVar->getValueType(), hlsAddrVar);
-
-	// Create a getelemntptr inst to get the adress of the 20th index of the
-	// address
-	Value *hlsAddr36 = builder.CreateConstInBoundsGEP1_64(
-		IntegerType::getInt32Ty(context), hlsAddrBramAddr, 36);
-#ifdef DEBUG_PRINT
-	insertPrint(builder, "\tWill write to: ", hlsAddr36, *bblk->getModule());
-#endif
-#endif
-
-#ifdef USE_HLS
-	// Create a Store inst to store the bram address to the 6th index from
-	// the HLS base address which is the bram parameter
-	builder.CreateStore(
-		ConstantInt::get(context, llvm::APInt(32, BRAM_ADDRESS)), hlsAddr36);
-	/**
-	 * Write value 0x1 to the control signals. This will fire-off the HLS
-	 * function with the values currently written. This is done every time we
-	 * create this block
-	 */
-
-	// Create a Load inst to load the local control signals value
-	LoadInst *currSigs = builder.CreateLoad(
-		ctrlSigVar->getAllocatedType(),
-		ctrlSigVar);
-
-	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
-	Value *startBitSet = builder.CreateOr(currSigs,
-		ConstantInt::get(context, APInt(32, 0x1)));
-
-	// Create a load inst to read the address of the global pointer variable
-	LoadInst *hlsAddrCtrl = builder.CreateLoad(
-		hlsAddrVar->getValueType(), hlsAddrVar);
-
-	// Create a getelemntptr inst to get the HLS adress at the 0th index
-	Value *hlsAddr0 = builder.CreateConstInBoundsGEP1_64(
-		IntegerType::getInt32Ty(context), hlsAddrCtrl, 0);
-
-	// Create a Store inst to store the set signals to the corresp. HLS address
-	builder.CreateStore(startBitSet, hlsAddr0);
+	// Trigger top function by setting the start bit
+	LoadInst *ctrl_sig_val = builder.CreateLoad(
+		ctrl_sig_var->getAllocatedType(), ctrl_sig_var);
+	Value *start_bit_val = builder.CreateOr(ctrl_sig_val,
+		ConstantInt::get(ctx, APInt(32, 0x1)));
+	hls_base_addr = builder.CreateLoad(hls_global_var->getValueType(),
+		hls_global_var);
+	Value *hls_ctrl_addr = builder.CreateConstInBoundsGEP1_64(
+		IntegerType::getInt32Ty(ctx), hls_base_addr, 0);
+	builder.CreateStore(start_bit_val, hls_ctrl_addr);
 #endif
 
 #ifndef USE_HLS
 	Value *atfArgs[16] =
 	{
-		nodatDataLsInt,
-		nodatDataMsInt,
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context)),
-		ConstantPointerNull::get(Type::getInt32PtrTy(context))
+		ids_ls_val,
+		ids_ms_val,
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx)),
+		ConstantPointerNull::get(Type::getInt32PtrTy(ctx))
 	};
-	builder.CreateCall(declareFuncs[accprofSoftTopFunc], atfArgs);
+	builder.CreateCall(decl_funcs[accprofSoftTopFunc], atfArgs);
 	debug_errs("\ninserted call to accprof_soft_top_func");
 #endif
 
@@ -724,14 +589,14 @@ BasicBlock *writeFuncStartToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
  * the end of the function.
  * @param nextBblk We insert our new block before that block
  * @param func The function upon we build the block
- * @param context The context of current Module
+ * @param ctx The context of current Module
  * @return The block created
  */
-BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
-	LLVMContext &context)
+BasicBlock *create_wr_metrics_to_hls_bblk(AllocaInst *ctrl_sig_var,
+	Function *func, LLVMContext &ctx)
 {
 	Value *atfArgs[16];
-	BasicBlock *bblk = BasicBlock::Create(context, "", func);
+	BasicBlock *bblk = BasicBlock::Create(ctx, "", func);
 	IRBuilder<> builder(bblk, bblk->begin());
 	
 #ifdef DEBUG_PRINT
@@ -742,29 +607,29 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 
 #ifdef USE_HLS
 	// Create a load inst to read the address of the global pointer variable
-	LoadInst *nodeDataLsAddr = builder.CreateLoad(
-		hlsAddrVar->getValueType(), hlsAddrVar);
+	LoadInst *hls_base_addr = builder.CreateLoad(
+		hls_global_var->getValueType(), hls_global_var);
 
 	// Create a getelemntptr inst to get the adress of the 4th index of the
 	// address
-	Value *hlsAddr4 = builder.CreateConstInBoundsGEP1_64(
-		IntegerType::getInt32Ty(context), nodeDataLsAddr, 4);
-		//IntegerType::getInt32Ty(context), hlsAddrVar, 4);
+	Value *hls_id_ls_addr = builder.CreateConstInBoundsGEP1_64(
+		IntegerType::getInt32Ty(ctx), hls_base_addr, 4);
+		//IntegerType::getInt32Ty(ctx), hls_global_var, 4);
 #ifdef DEBUG_PRINT
-	//insertPrint(builder, "\tWill write 0 to: ", hlsAddr4, *bblk->getModule());
+	//insertPrint(builder,"\twrite 0 to: ",hls_id_ls_addr,*bblk->getModule());
 #endif
 #endif
 
 #ifdef USE_HLS
 	// Create a Store inst to store the function ID to the 4th index from
 	// the HLS base address which is the id parameter
-	builder.CreateStore(ConstantInt::get(context, llvm::APInt(32, 0)),
-						hlsAddr4);
+	builder.CreateStore(ConstantInt::get(ctx, llvm::APInt(32, 0)),
+		hls_id_ls_addr);
 #endif
 
 #ifndef USE_HLS
-	atfArgs[0] = ConstantInt::get(context, llvm::APInt(32, 0));
-	atfArgs[1] = ConstantInt::get(context, llvm::APInt(32, 0));
+	atfArgs[0] = ConstantInt::get(ctx, llvm::APInt(32, 0));
+	atfArgs[1] = ConstantInt::get(ctx, llvm::APInt(32, 0));
 #endif
 
 	// This for loop gets the values from the performance counters, splits their
@@ -774,16 +639,16 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 	Value *eventVal32;
 	for (int currHalf = 0; currHalf < 4; currHalf += 2)
 	{
-		for (int currEvent = 0; currEvent < eventIndicesNum * 4; currEvent += 4)
+		for (int currEvent = 0; currEvent < TOTAL_EVENTS * 4; currEvent += 4)
 		{
 			// Create Load Inst to load current counted event val from global
 			LoadInst *wholeEventVal = builder.CreateAlignedLoad(
-				IntegerType::getInt64Ty(context), globalEventVars[currEvent/4],
+				IntegerType::getInt64Ty(ctx), event_global_vars[currEvent/4],
 				MaybeAlign(8));
 
 #ifdef DEBUG_PRINT
 			insertPrint(builder, "\tEvent : ",
-				ConstantInt::get(context, llvm::APInt(32, currEvent/4)),
+				ConstantInt::get(ctx, llvm::APInt(32, currEvent/4)),
 				*bblk->getModule());
 			insertPrint(builder, "\t\twhole val: ", wholeEventVal, 
 				*bblk->getModule());
@@ -805,7 +670,7 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 			}
 			// Create a truncate Inst to convert 64bit value to 32bit
 			eventVal32 = builder.CreateTrunc(halfEventVal,
-				IntegerType::getInt32Ty(context));
+				IntegerType::getInt32Ty(ctx));
 
 #ifdef DEBUG_PRINT
 			insertPrint(builder, "\t\thalf val: ", eventVal32,
@@ -815,13 +680,13 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 #ifdef USE_HLS
 			// Create a load inst to read the address of the global pointer
 			// variable
-			LoadInst *hlsAddr = builder.CreateLoad(
-				hlsAddrVar->getValueType(), hlsAddrVar);
+			hls_base_addr = builder.CreateLoad(
+				hls_global_var->getValueType(), hls_global_var);
 
 			// Create a getelemntptr inst to get the adress of the index
 			// required to write specific event
 			Value *hlsAddrAtIndex = builder.CreateConstInBoundsGEP1_64(
-				IntegerType::getInt32Ty(context), hlsAddr,
+				IntegerType::getInt32Ty(ctx), hls_base_addr,
 				8 + currEvent + currHalf);
 #ifdef DEBUG_PRINT
 			insertPrint(builder, "\t\twill write to: ", hlsAddrAtIndex,
@@ -845,17 +710,17 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 #ifdef USE_HLS
 	// Create a load inst to read the address of the global pointer variable
 	LoadInst *hlsAddrBramAddr = builder.CreateLoad(
-		hlsAddrVar->getValueType(), hlsAddrVar);
+		hls_global_var->getValueType(), hls_global_var);
 
 	// Create a getelemntptr inst to get the adress of the 20th index of the
 	// address
 	Value *hlsAddr36 = builder.CreateConstInBoundsGEP1_64(
-		IntegerType::getInt32Ty(context), hlsAddrBramAddr, 36);
+		IntegerType::getInt32Ty(ctx), hlsAddrBramAddr, 36);
 
 	// Create a Store inst to store the bram address to the 6th index from
 	// the HLS base address which is the bram parameter
 	builder.CreateStore(
-		ConstantInt::get(context, llvm::APInt(32, BRAM_ADDRESS)), hlsAddr36);
+		ConstantInt::get(ctx, llvm::APInt(32, BRAM_ADDRESS)), hlsAddr36);
 
 	/**
 	 * Write value 0x1 to the control signals.
@@ -863,29 +728,29 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
 
 	// Create a Load inst to load the control signals previously stored in
 	// currCtrlSigs variable
-	LoadInst *currSigs = builder.CreateAlignedLoad(
-		IntegerType::getInt32Ty(context), ctrlSigVar,
+	LoadInst *ctrl_sig_val = builder.CreateAlignedLoad(
+		IntegerType::getInt32Ty(ctx), ctrl_sig_var,
 		MaybeAlign(4));
 
 	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
-	Value *startBitSet = builder.CreateOr(currSigs,
-		ConstantInt::get(context, APInt(32, 0x1)));
+	Value *start_bit_val = builder.CreateOr(ctrl_sig_val,
+		ConstantInt::get(ctx, APInt(32, 0x1)));
 
 	// Create a load inst to read the address of the global pointer variable
-	LoadInst *hlsAddrCtrl = builder.CreateLoad(hlsAddrVar->getValueType(),
-		hlsAddrVar);
+	LoadInst *hlsAddrCtrl = builder.CreateLoad(hls_global_var->getValueType(),
+		hls_global_var);
 
 	// Create a getelemntptr inst to get the adress of the 0th index of the
 	// address
-	Value *hlsAddr0 = builder.CreateConstInBoundsGEP1_64(
-		IntegerType::getInt32Ty(context), hlsAddrCtrl, 0);
+	Value *hls_ctrl_addr = builder.CreateConstInBoundsGEP1_64(
+		IntegerType::getInt32Ty(ctx), hlsAddrCtrl, 0);
 
 	// Create a Store inst to store the number to currCtrlSigs
-	builder.CreateAlignedStore(startBitSet, hlsAddr0, MaybeAlign(4));
+	builder.CreateAlignedStore(start_bit_val, hls_ctrl_addr, MaybeAlign(4));
 #endif
 
 #ifndef USE_HLS
-	builder.CreateCall(declareFuncs[accprofSoftTopFunc], atfArgs);
+	builder.CreateCall(decl_funcs[accprofSoftTopFunc], atfArgs);
 #endif
 #ifdef DEBUG_PRINT
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
@@ -901,102 +766,107 @@ BasicBlock *writeFuncEndToHlsBlock(AllocaInst *ctrlSigVar, Function *func,
  * the returned function stored in the global variables, with the current
  * function metrics stored in the local variables and stores the result back in
  * the local variables. 
- * @param thisBblk We add instruction to this block
- * @param context The context of current Module
+ * @param bblk We add instruction to this block
+ * @param ctx The context of current Module
  */
-void addGlobalsToLocalsAfterCallBlock(BasicBlock *thisBblk, LLVMContext &context)
+void inject_add_globals_to_locals(BasicBlock *bblk, LLVMContext &ctx)
 {
-	IRBuilder<> builder(thisBblk, thisBblk->begin());
+	IRBuilder<> builder(bblk, bblk->begin());
 #ifdef DEBUG_PRINT
-	insertPrint(builder,  std::string(__func__) + " <<" + thisBblk->getParent()->getName().str()
-		+ ">>: START", nullptr, *thisBblk->getModule());
+	insertPrint(builder,  std::string(__func__) + " <<" +
+		bblk->getParent()->getName().str() + ">>: START", nullptr,
+		*bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << thisBblk->getParent()->getName().str() << ": Enter");
+	debug_errs(__func__<< ": " << bblk->getParent()->getName().str()
+		<< ": Enter");
 
-	for (int i = 0; i < eventIndicesNum; ++i)
+	for (int i = 0; i < TOTAL_EVENTS; ++i)
 	{
 		// Create a load inst to read the value of the global event variable
 		LoadInst *globalEventVal = builder.CreateLoad(
-			globalEventVars[i]->getValueType(), globalEventVars[i]);
+			event_global_vars[i]->getValueType(), event_global_vars[i]);
 
 		// Create a load inst to read the value of the local event variable
 		LoadInst *localEventVal = builder.CreateLoad(
-			localEventVars[i]->getAllocatedType(), localEventVars[i]);
+			event_local_vars[i]->getAllocatedType(), event_local_vars[i]);
 
 		// Create an Add inst to add local event value and global event value
 		Value *totalEventVal = builder.CreateAdd(localEventVal, globalEventVal);
 
 		// Create a Store inst to store sum back to local event var
-		builder.CreateStore(totalEventVal, localEventVars[i]);
+		builder.CreateStore(totalEventVal, event_local_vars[i]);
 	}
 	// Create a call inst to sel4bench_reset_counters
-	builder.CreateCall(declareFuncs[sel4BenchRstCounts]);
+	builder.CreateCall(decl_funcs[SEL4BENCH_RESET_COUNTERS]);
 
 	// Create a call inst to sel4bench_start_counters/ 0x3F = 0b111111
-	Value *s4bsceArg[1] = {ConstantInt::get(context, APInt(64, 0x3F))};
-	builder.CreateCall(declareFuncs[sel4BenchStartCountsFunc], s4bsceArg);
+	Value *s4bsceArg[1] = {ConstantInt::get(ctx, APInt(64, 0x3F))};
+	builder.CreateCall(decl_funcs[SEL4BENCH_START_COUNTERS], s4bsceArg);
 
 	CallInst *readPmcr = builder.CreateCall(
-		declareFuncs[sel4BenchPrivReadPmcrFunc]);
+		decl_funcs[SEL4BENCH_PRIVATE_READ_PMCR]);
 
 	// Create an OR inst to set the ap_start(bit 0) and ap_continue(bit 4)
 	Value *cycleCounter = builder.CreateOr(readPmcr,
-		ConstantInt::get(context, APInt(32, 0x4)));
+		ConstantInt::get(ctx, APInt(32, 0x4)));
 
 	// Create a call inst to sel4bench_private_write_pmcr
 	Value *s4bpwpArg[1] = {cycleCounter};
-	builder.CreateCall(declareFuncs[sel4BenchPrivReadPmcrFunc],
-		s4bpwpArg);
+	builder.CreateCall(decl_funcs[SEL4BENCH_PRIVATE_READ_PMCR], s4bpwpArg);
 
 #ifdef DEBUG_PRINT
-	insertPrint(builder,  std::string(__func__) + " <<" + thisBblk->getParent()->getName().str() + ">>: END",
-		nullptr, *thisBblk->getModule());
+	insertPrint(builder,  std::string(__func__) + " <<" +
+		bblk->getParent()->getName().str() + ">>: END", nullptr,
+		*bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << thisBblk->getParent()->getName().str() << ": Exit");
+	debug_errs(__func__<< ": " << bblk->getParent()->getName().str()
+		<< ": Exit");
 }
 
 /**
  * Takes a block that contains a call instruction. Before the call it reads
  * current events and cpu cycles running and stores to local variables.
- * @param thisBblk We add instruction to this block
- * @param context The context of current Module
+ * @param bblk We add instruction to this block
+ * @param ctx The context of current Module
  */
-void readCountersBeforeCallBlock(BasicBlock *thisBblk, LLVMContext &context)
+void inject_add_counters_to_locals(BasicBlock *bblk, LLVMContext &ctx)
 {
 
-	IRBuilder<> builder(thisBblk, thisBblk->begin());
+	IRBuilder<> builder(bblk, bblk->begin());
 #ifdef DEBUG_PRINT
-	insertPrint(builder,  std::string(__func__) + " <<" + thisBblk->getParent()->getName().str() + ">>: START",
-		nullptr, *thisBblk->getModule());
+	insertPrint(builder,  std::string(__func__) + " <<" +
+		bblk->getParent()->getName().str() + ">>: START", nullptr,
+		*bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << thisBblk->getParent()->getName().str() << ": Enter");
-	CallInst *countEventVals[eventIndicesNum];
+	debug_errs(__func__<<": "<<bblk->getParent()->getName().str()<<": Enter");
+	CallInst *countEventVals[TOTAL_EVENTS];
 
 	// Create call inst to sel4bench_get_cycle_count to get cpu cycles count
-	countEventVals[cpuCyclesIndex] = builder.CreateCall(
-		declareFuncs[sel4BenchGetCycleCountFunc]);
+	countEventVals[CPU_CYCLES] = builder.CreateCall(
+		decl_funcs[SEL4BENCH_GET_CYCLE_COUNT]);
 
 	// Create call inst to sel4bench_get_counter to get the other event counts
-	for (int i = 1; i < eventIndicesNum; ++i)
+	for (int i = 1; i < TOTAL_EVENTS; ++i)
 	{
-		Value *s4bgcArg[1] = {ConstantInt::get(context, APInt(64, i - 1))};
+		Value *s4bgcArg[1] = {ConstantInt::get(ctx, APInt(64, i - 1))};
 		countEventVals[i] = builder.CreateCall(
-			declareFuncs[sel4BenchGetCounterFunc], s4bgcArg);
+			decl_funcs[SEL4BENCH_GET_COUNTER], s4bgcArg);
 	}
 	// For each count, load local, add with recent counts, store back to local
-	for (int i = 0; i < eventIndicesNum; ++i)
+	for (int i = 0; i < TOTAL_EVENTS; ++i)
 	{
 		LoadInst *localEventVal = builder.CreateLoad(
-			localEventVars[i]->getAllocatedType(), localEventVars[i]);
+			event_local_vars[i]->getAllocatedType(), event_local_vars[i]);
 		Value *totalEventVal = builder.CreateAdd(localEventVal,
 			countEventVals[i]);
-		builder.CreateStore(totalEventVal, localEventVars[i]);
+		builder.CreateStore(totalEventVal, event_local_vars[i]);
 	}
 	#ifdef DEBUG_PRINT
-	insertPrint(builder,  std::string(__func__) + " <<" + thisBblk->getParent()->getName().str() + ">>: END",
-		nullptr, *thisBblk->getModule());
+	insertPrint(builder, std::string(__func__) + " <<" +
+		bblk->getParent()->getName().str() + ">>: END", nullptr,
+		*bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << thisBblk->getParent()->getName().str() << ": Exit");
+	debug_errs(__func__<<": "<< bblk->getParent()->getName().str() << ": Exit");
 }
 
 /**
@@ -1005,11 +875,11 @@ void readCountersBeforeCallBlock(BasicBlock *thisBblk, LLVMContext &context)
  * the sum to the corresponding global variable.
  * @param nextBblk We insert our new block before that block
  * @param func The function upon we build the block
- * @param context The context of current Module
+ * @param ctx The context of current Module
  */
-BasicBlock *writeGlobalsBeforeReturnBlock(Function *func, LLVMContext &context)
+BasicBlock *create_wr_metrics_to_globals_bblk(Function *func, LLVMContext &ctx)
 {
-	BasicBlock *bblk = BasicBlock::Create(context, "", func);
+	BasicBlock *bblk = BasicBlock::Create(ctx, "", func);
 	IRBuilder<> builder(bblk, bblk->begin());
 
 #ifdef DEBUG_PRINT
@@ -1018,21 +888,21 @@ BasicBlock *writeGlobalsBeforeReturnBlock(Function *func, LLVMContext &context)
 #endif
 	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
 
-	CallInst *countEventVals[eventIndicesNum];
+	CallInst *countEventVals[TOTAL_EVENTS];
 	// Create call inst to sel4bench_get_cycle_count to get cpu cycles count
-	countEventVals[cpuCyclesIndex] = builder.CreateCall(
-		declareFuncs[sel4BenchGetCycleCountFunc]);
+	countEventVals[CPU_CYCLES] = builder.CreateCall(
+		decl_funcs[SEL4BENCH_GET_CYCLE_COUNT]);
 
 	// Create call inst to sel4bench_get_counter to get the other event counts
-	for (int i = 1; i < eventIndicesNum; ++i)
+	for (int i = 1; i < TOTAL_EVENTS; ++i)
 	{
-		Value *s4bgcArg[1] = {ConstantInt::get(context, APInt(64, i - 1))};
+		Value *s4bgcArg[1] = {ConstantInt::get(ctx, APInt(64, i - 1))};
 		countEventVals[i] = builder.CreateCall(
-			declareFuncs[sel4BenchGetCounterFunc], s4bgcArg);
+			decl_funcs[SEL4BENCH_GET_COUNTER], s4bgcArg);
 	}
 	// For each count, load local, add with recent counts, store back to local
 	Function::arg_iterator  arg = func->arg_begin();
-	for (int i = 0; i < eventIndicesNum; ++i)
+	for (int i = 0; i < TOTAL_EVENTS; ++i)
 	{
 		Value* argVal = &*arg;
 
@@ -1045,10 +915,10 @@ BasicBlock *writeGlobalsBeforeReturnBlock(Function *func, LLVMContext &context)
 				*func->getParent());
 #endif
 		// LoadInst *localEventVal = builder.CreateLoad(
-		// 	localEventVars[i]->getAllocatedType(), localEventVars[i]);
+		// 	event_local_vars[i]->getAllocatedType(), event_local_vars[i]);
 		Value *totalEventVal = builder.CreateAdd(localEventVal,
 			countEventVals[i]);
-		builder.CreateStore(totalEventVal, globalEventVars[i]);
+		builder.CreateStore(totalEventVal, event_global_vars[i]);
 		++arg;
 	}
 #ifdef DEBUG_PRINT
@@ -1064,53 +934,49 @@ BasicBlock *writeGlobalsBeforeReturnBlock(Function *func, LLVMContext &context)
  * Iterates over a function's basic blocks searching for call instructions which
  * call functions that match the name of the functions we want to instrument.
  * Finally it returns a vector with those instructions.
- * @param funcNames A vector containing the function names of which the call
+ * @param func_names A vector containing the function names of which the call
  * instructions must match with
  * @param func The function of which we iterate over the basic blocks and
  * instructions
  * @return The vector of the maching call instructions
  */
-std::vector<Instruction *> getCallInsts(std::vector<std::string> &funcNames,
+std::vector<Instruction *> get_call_instrs(std::vector<std::string> &func_names,
 	Function *func)
 {
 	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
+	std::vector<Instruction *> call_instrs;
 
-	std::vector<Instruction *> callInsts;
-
-	for (Function::iterator bblk = func->begin(); bblk != func->end(); ++bblk)
+	for (Function::iterator basic_bblk = func->begin();
+		basic_bblk != func->end(); ++basic_bblk)
 	{
-		for (BasicBlock::iterator instr = bblk->begin(); instr != bblk->end();
-			++instr)
+		for (BasicBlock::iterator instruction = basic_bblk->begin();
+			instruction != basic_bblk->end(); ++instruction)
 		{
-			CallInst *callInst = dyn_cast<CallInst>(&*instr);
-			if (callInst)
-			{
-				std::vector<std::string>::iterator funcNamesIt;
-				Function *calledFunction = callInst->getCalledFunction();
-				if(calledFunction != nullptr) //.equals(StringRef("", 0))
-				{
-					std::string calledFuncName =
-					callInst->getCalledFunction()->getName().str();
-					// search if called function name exists in vector of names
-					funcNamesIt = std::find(funcNames.begin(), funcNames.end(),
-						calledFuncName);
-					// If it does, push the instruction
-					if (funcNamesIt != funcNames.end())
-					{
-						callInsts.push_back(&*instr);
+			CallInst *call_instr = dyn_cast<CallInst>(&*instruction);
+			if (!call_instr)
+				continue;
+			std::vector<std::string>::iterator func_names_iter;
+			Function *call_instr_func =
+				call_instr->getCalledFunction();
+			if(!call_instr_func)
+				continue;
+			std::string call_instr_func_name =
+			call_instr->getCalledFunction()->getName().str();
+			func_names_iter = std::find(func_names.begin(),
+				func_names.end(), call_instr_func_name);
+			if (func_names_iter == func_names.end())
+				continue;
+			call_instrs.push_back(&*instruction);
 #ifdef DEBUG_PRINT
-						IRBuilder<> builder(&*bblk, (&*bblk)->begin());
-						insertPrint(builder,  std::string(__func__) + " <<" +
-							func->getName().str() + ">>: call found to " +
-							calledFuncName,	nullptr, *bblk->getModule());
+			IRBuilder<> builder(&*basic_bblk, (&*basic_bblk)->begin());
+			insertPrint(builder,  std::string(__func__) + " <<" +
+				func->getName().str() + ">>: call found to " +
+				call_instr_func_name,	nullptr, *basic_bblk->getModule());
 #endif
-					}
-				}
-			}
 		}
 	}
 	debug_errs(__func__<< ": " << func->getName().str() << ": Exit");
-	return callInsts;
+	return call_instrs;
 }
 
 /**
@@ -1120,19 +986,17 @@ std::vector<Instruction *> getCallInsts(std::vector<std::string> &funcNames,
  * instructions
  * @return The vector of the maching return instructions
  */
-std::vector<Instruction *> getReturnInsts(Function *func)
+std::vector<Instruction *> get_ret_instrs(Function *func)
 {
 	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
 
-	std::vector<Instruction *> retInsts;
-
+	std::vector<Instruction *> ret_instrs;
 	for (Function::iterator bblk = func->begin(); bblk != func->end(); ++bblk)
 	{
-		for (BasicBlock::iterator instr = bblk->begin(); instr != bblk->end();
-			++instr)
+		for (BasicBlock::iterator instr = bblk->begin(); instr != bblk->end(); ++instr)
 		{
-			ReturnInst *retInst = dyn_cast<ReturnInst>(&*instr);
-			if (retInst)
+			ReturnInst *ret_instr = dyn_cast<ReturnInst>(&*instr);
+			if (ret_instr)
 			{
 #ifdef DEBUG_PRINT
 				IRBuilder<> builder(&*bblk, (&*bblk)->begin());
@@ -1140,14 +1004,15 @@ std::vector<Instruction *> getReturnInsts(Function *func)
 					func->getName().str() + ">>: return found!", nullptr,
 					*bblk->getModule());
 #endif
-				retInsts.push_back(&*instr);
+				ret_instrs.push_back(&*instr);
 			}
 		}
 	}
-
 	debug_errs(__func__<< ": " << func->getName().str() << ": Exit");
-	return retInsts;
+	return ret_instrs;
 }
+
+
 #ifdef USE_SEL4BENCH
 std::vector<Instruction *> getTermInst(Function *func)
 {
@@ -1184,194 +1049,190 @@ std::vector<Instruction *> getTermInst(Function *func)
  * Defines a function to which call instructions will be injected by the pass,
  * at the prologue of each function that will be profiled.
  * @param M The current Module Object
- * @param context The context of current Module
+ * @param ctx The context of current Module
  * @return The object to the function created
  */
-Function* createPrologueFunction(int funcID, Module &M, LLVMContext &context)
+Function* create_prolog_func(int funcID, Module &M, LLVMContext &ctx)
 {
 	debug_errs(__func__<< ": Enter");
-	Value *idleOff;
+	Value *is_idle_bit_0_val;
 
-	std::vector<Type*> funcParamsType { Type::getInt32Ty(context) };// func ID 
-	Type* funcRetType = Type::getVoidTy(context);
-	FunctionType* ft = FunctionType::get(funcRetType, funcParamsType, false);
-	Function* prologFunc = Function::Create(ft, Function::ExternalLinkage,
+	std::vector<Type*> func_param_typ { Type::getInt32Ty(ctx) };// func ID 
+	Type* func_ret_typ = Type::getVoidTy(ctx);
+	FunctionType* ft = FunctionType::get(func_ret_typ, func_param_typ, false);
+	Function* prolog_func = Function::Create(ft, Function::ExternalLinkage,
 		"accprof_prolog", &M);
 
-	// Every source file used to compile the image will be scanned by the pass.
-	// We only initialize the counters in the source file withe main function.
-	// We assume that the file is named 'main.xx'
-	std::string fullPathFilename = M.getName().str();
-	std::string filename = std::filesystem::path(fullPathFilename).filename().
-		replace_extension("").string();
-	// In case of profiling multiple files, we want the prologue function to
-	// only be defined in the main file and be declared in the rest.
-	if(filename == "main")
-	{
-		// Create a dummy block with a return to add all other blocks before it
-		BasicBlock *firstBblk = BasicBlock::Create(context, "", prologFunc);
-		IRBuilder<> firstBblkBuilder(firstBblk, firstBblk->begin());
-		AllocaInst* ctrlSigVar = firstBblkBuilder.CreateAlloca(
-				IntegerType::getInt32Ty(context));
-
-
-		BasicBlock *notIdleBblk = createSpinLockOnIdleBitBlock(ctrlSigVar,
-			prologFunc, context, &idleOff);
-
-		BasicBlock *idleBblk = writeFuncStartToHlsBlock(ctrlSigVar, prologFunc,
-			context, funcID);
-
-		firstBblkBuilder.CreateBr(notIdleBblk);
-
-		IRBuilder<> notIdleBblkBuilder(notIdleBblk, notIdleBblk->end());
-		notIdleBblkBuilder.CreateCondBr(idleOff, notIdleBblk, idleBblk);
-
-		IRBuilder<> idleBblkBuilder(idleBblk, idleBblk->end());
-		idleBblkBuilder.CreateRetVoid();
+	std::string absolut_filename = M.getName().str();
+	std::string src_filename = std::filesystem::path(absolut_filename).
+		filename().replace_extension("").string();
+	// define function only once in main.c
+	if(src_filename == "main")
+	{	// create blocks
+		BasicBlock *entry_bblk = BasicBlock::Create(ctx, "", prolog_func);
+		IRBuilder<> entry_bblk_builder(entry_bblk, entry_bblk->begin());
+		AllocaInst* ctrl_sig_var = entry_bblk_builder.CreateAlloca(
+				IntegerType::getInt32Ty(ctx));
+		BasicBlock *spinlock_idle_bit_bblk = create_spinlock_idle_bit_bblk(
+			ctrl_sig_var, prolog_func, ctx, &is_idle_bit_0_val);
+		BasicBlock *wr_fid_to_hls_bblk = create_wr_fid_to_hls_bblk(ctrl_sig_var,
+			prolog_func, ctx, funcID);
+		// connect blocks
+		entry_bblk_builder.CreateBr(spinlock_idle_bit_bblk);
+		IRBuilder<> spinlock_idle_bit_bblk_builder(spinlock_idle_bit_bblk,
+			spinlock_idle_bit_bblk->end());
+		spinlock_idle_bit_bblk_builder.CreateCondBr(is_idle_bit_0_val,
+			spinlock_idle_bit_bblk, wr_fid_to_hls_bblk);
+		IRBuilder<> wr_fid_to_hls_bblk_builder(wr_fid_to_hls_bblk,
+			wr_fid_to_hls_bblk->end());
+		wr_fid_to_hls_bblk_builder.CreateRetVoid();
 		debug_errs(__func__<< ": Exit");
 	}
-	return prologFunc;
+	return prolog_func;
 }
 
 /**
  * Defines a function to which call instructions will be injected by the pass,
  * before each return instruction of a function that will be profiled.
  * @param M The current Module Object
- * @param context The context of current Module
+ * @param ctx The context of current Module
  * @return The object to the function created
  */
-Function* createEpilogueFunction(Module &M, LLVMContext &context)
+Function* create_epilog_func(Module &M, LLVMContext &ctx)
 {
 	debug_errs(__func__<< ": Enter");
-	Value *idleOff;
+	Value *is_idle_bit_0_val;
 
-	std::vector<Type*> funcParamsType
+	std::vector<Type*> func_param_typ
 	{
-		Type::getInt64Ty(context), // cpu cycles
-		Type::getInt64Ty(context), // event 0
-		Type::getInt64Ty(context), // event 1
-		Type::getInt64Ty(context), // event 2
-		Type::getInt64Ty(context), // event 3
-		Type::getInt64Ty(context), // event 4
-		Type::getInt64Ty(context)  // event 5
+		Type::getInt64Ty(ctx), // cpu cycles
+		Type::getInt64Ty(ctx), // event 0
+		Type::getInt64Ty(ctx), // event 1
+		Type::getInt64Ty(ctx), // event 2
+		Type::getInt64Ty(ctx), // event 3
+		Type::getInt64Ty(ctx), // event 4
+		Type::getInt64Ty(ctx)  // event 5
 	};
-	Type* funcRetType = Type::getVoidTy(context);
-	FunctionType* ft = FunctionType::get(funcRetType, funcParamsType, false);
-	Function* epilogFunc = Function::Create(ft, Function::ExternalLinkage,
+	Type* func_ret_typ = Type::getVoidTy(ctx);
+	FunctionType* ft = FunctionType::get(func_ret_typ, func_param_typ, false);
+	Function* epilog_func = Function::Create(ft, Function::ExternalLinkage,
 		"accprof_epilog", &M);
-	std::string fullPathFilename = M.getName().str();
-	std::string filename = std::filesystem::path(fullPathFilename).filename().
-		replace_extension("").string();
+	std::string absolut_filename = M.getName().str();
+	std::string src_filename = std::filesystem::path(absolut_filename).
+		filename().replace_extension("").string();
 	
 	// In case of profiling multiple files, we want the epilogue function to
 	// only be defined in the main file and be declared in the rest.
-	if(filename == "main")
+	if(src_filename == "main")
 	{
 		// Create a dummy block with a return to add all other blocks before it
-		BasicBlock *firstBblk = BasicBlock::Create(context, "", epilogFunc);
-		IRBuilder<> firstBblkBuilder(firstBblk, firstBblk->begin());
-		AllocaInst* ctrlSigVar = firstBblkBuilder.CreateAlloca(
-				IntegerType::getInt32Ty(context));
+		BasicBlock *entry_bblk = BasicBlock::Create(ctx, "", epilog_func);
+		IRBuilder<> entry_bblk_builder(entry_bblk, entry_bblk->begin());
+		AllocaInst* ctrl_sig_var = entry_bblk_builder.CreateAlloca(
+				IntegerType::getInt32Ty(ctx));
+		BasicBlock *wr_metrics_to_globals_bblk =
+			create_wr_metrics_to_globals_bblk(epilog_func, ctx);
+		BasicBlock *spinlock_idle_bit_bblk = create_spinlock_idle_bit_bblk(
+			ctrl_sig_var, epilog_func, ctx, &is_idle_bit_0_val);
+		BasicBlock *wr_metrics_to_hls_bblk = create_wr_metrics_to_hls_bblk(
+			ctrl_sig_var, epilog_func, ctx);
 
-		BasicBlock *wrGlobBblk = writeGlobalsBeforeReturnBlock(epilogFunc, context);
-		
-		BasicBlock *notIdleBblk = createSpinLockOnIdleBitBlock(ctrlSigVar,
-			epilogFunc, context, &idleOff);
-
-		BasicBlock *idleBblk = writeFuncEndToHlsBlock(ctrlSigVar, epilogFunc,
-			context);
-		
-		firstBblkBuilder.CreateBr(wrGlobBblk);
-
-		IRBuilder<> wrGlobBblkBuilder(wrGlobBblk, wrGlobBblk->end());
-		wrGlobBblkBuilder.CreateBr(notIdleBblk);
-
-		IRBuilder<> notIdleBblkBuilder(notIdleBblk, notIdleBblk->end());
-		notIdleBblkBuilder.CreateCondBr(idleOff, notIdleBblk, idleBblk);
-
-		IRBuilder<> idleBblkBuilder(idleBblk, idleBblk->end());
-		idleBblkBuilder.CreateRetVoid();
+		entry_bblk_builder.CreateBr(wr_metrics_to_globals_bblk);
+		IRBuilder<> wr_metrics_to_globals_bblk_builder(
+			wr_metrics_to_globals_bblk, wr_metrics_to_globals_bblk->end());
+		wr_metrics_to_globals_bblk_builder.CreateBr(spinlock_idle_bit_bblk);
+		IRBuilder<> spinlock_idle_bit_bblk_builder(spinlock_idle_bit_bblk,
+			spinlock_idle_bit_bblk->end());
+		spinlock_idle_bit_bblk_builder.CreateCondBr(is_idle_bit_0_val,
+			spinlock_idle_bit_bblk, wr_metrics_to_hls_bblk);
+		IRBuilder<> wr_metrics_to_hls_bblk_builder(wr_metrics_to_hls_bblk,
+			wr_metrics_to_hls_bblk->end());
+		wr_metrics_to_hls_bblk_builder.CreateRetVoid();
 		debug_errs(__func__<< ": Exit");
 	}
-	return epilogFunc;
+	return epilog_func;
 }
 
 /**
- * Iterates over the SeL4 function names in @c declareFuncNames and for every
+ * Iterates over the SeL4 function names in @c decl_func_names and for every
  * function that is not visible in the module, it creates an external
  * declaration to it, so that it can be compiled successfully before linking
  * phase.
  * @param M The current Module Object
- * @param context The context of current Module
+ * @param ctx The context of current Module
  */
-void createExternalFunctionDeclarations(Module &M, LLVMContext &context)
+void create_extern_func_declarations(Module &M, LLVMContext &ctx)
 {
 	debug_errs(__func__<< ": Enter");
-	std::vector<std::vector<Type*>> declareFuncParamsType
+	std::vector<std::vector<Type*>> decl_func_param_typ
 	{
 #ifndef USE_HLS
 		{
-			Type::getInt32Ty(context), Type::getInt32Ty(context),
-			Type::getInt32Ty(context), Type::getInt32Ty(context),
-			Type::getInt32Ty(context), Type::getInt32Ty(context),
-			Type::getInt32Ty(context), Type::getInt32Ty(context),
-			Type::getInt32Ty(context), Type::getInt32Ty(context),
-			Type::getInt32Ty(context), Type::getInt32Ty(context),
-			Type::getInt32Ty(context), Type::getInt32Ty(context),
-			Type::getInt32Ty(context), Type::getInt32Ty(context)
+			Type::getInt32Ty(ctx), Type::getInt32Ty(ctx),
+			Type::getInt32Ty(ctx), Type::getInt32Ty(ctx),
+			Type::getInt32Ty(ctx), Type::getInt32Ty(ctx),
+			Type::getInt32Ty(ctx), Type::getInt32Ty(ctx),
+			Type::getInt32Ty(ctx), Type::getInt32Ty(ctx),
+			Type::getInt32Ty(ctx), Type::getInt32Ty(ctx),
+			Type::getInt32Ty(ctx), Type::getInt32Ty(ctx),
+			Type::getInt32Ty(ctx), Type::getInt32Ty(ctx)
 		},
 		{},
 #endif
 		{},
 		{},
-		{Type::getInt64Ty(context)},
-		{Type::getInt64Ty(context), Type::getInt64Ty(context)},
+		{Type::getInt64Ty(ctx)},
+		{Type::getInt64Ty(ctx), Type::getInt64Ty(ctx)},
 		{},
-		{Type::getInt32Ty(context)},
+		{Type::getInt32Ty(ctx)},
 		{},
-		{Type::getInt64Ty(context)}
+		{Type::getInt64Ty(ctx)}
+		//{Type::getInt64PtrTy(ctx), Type::getInt32PtrTy(ctx)},
+		//{attkey_typ, Type::getInt32Ty(ctx)}
 	};
-	Type* declareFuncRetType[declareFuncsNum] =
+	Type* decl_func_ret_types[TOTAL_DECL_FUNCS] =
 	{
 #ifndef USE_HLS
-		Type::getVoidTy(context),
-		Type::getVoidTy(context),
+		Type::getVoidTy(ctx),
+		Type::getVoidTy(ctx),
 #endif
-		Type::getVoidTy(context),
-		Type::getVoidTy(context),
-		Type::getVoidTy(context),
-		Type::getVoidTy(context),
-		Type::getInt32Ty(context),
-		Type::getVoidTy(context),
-		Type::getInt64Ty(context),
-		Type::getInt64Ty(context)
+		Type::getVoidTy(ctx),
+		Type::getVoidTy(ctx),
+		Type::getVoidTy(ctx),
+		Type::getVoidTy(ctx),
+		Type::getInt32Ty(ctx),
+		Type::getVoidTy(ctx),
+		Type::getInt64Ty(ctx),
+		Type::getInt64Ty(ctx)
+		//attkey_typ,
+		//Type::getInt8PtrTy(ctx)
 	};
 	debug_errs("\tModule initially visible functions:");
 	for (Module::iterator func = M.begin(); func != M.end(); ++func)
 	{
-		for (int i = 0; i < declareFuncsNum; i++)
+		for (int i = 0; i < TOTAL_DECL_FUNCS; i++)
 		{
-			if(func->getName().str() == declareFuncNames[i])
+			if(func->getName().str() == decl_func_names[i])
 			{
-				declareFuncs[i] = M.getFunction(declareFuncNames[i]);
+				decl_funcs[i] = M.getFunction(decl_func_names[i]);
 				break;
 			}
 		}
 		debug_errs("\t\t" << func->getName().str());
 	}
-	for (int i = 0; i < declareFuncsNum; i++)
+	for (int i = 0; i < TOTAL_DECL_FUNCS; i++)
 	{
-		if(!declareFuncs[i])
+		if(!decl_funcs[i])
 		{
 			FunctionType* ft;
-			if(!declareFuncParamsType[i].empty())
-				ft = FunctionType::get(declareFuncRetType[i],
-					declareFuncParamsType[i], false);
+			if(!decl_func_param_typ[i].empty())
+				ft = FunctionType::get(decl_func_ret_types[i],
+					decl_func_param_typ[i], false);
 			else
-				ft = FunctionType::get(declareFuncRetType[i], false);
+				ft = FunctionType::get(decl_func_ret_types[i], false);
 
-			declareFuncs[i] = Function::Create(ft, Function::ExternalLinkage,
-				declareFuncNames[i], &M);
+			decl_funcs[i] = Function::Create(ft, Function::ExternalLinkage,
+				decl_func_names[i], &M);
 		}
 	}
 	debug_errs(__func__<< ": Exit");

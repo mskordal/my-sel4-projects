@@ -46,8 +46,8 @@ mkdir llvmpassbuild && cd llvmpassbuild
 # 5. -DDEBUG_COMP_PRINT=ON : Prints debug messages during pass instrumentation
 # 6. -DDEBUG_PRINT=ON : Injects printfs to the application. Useful for runtime
 # debugging. Avoid on actual runs since it increases instrumentation load.
-cmake -DLT_LLVM_INSTALL_DIR=$LLVM_DIR ../accProfPass -DUSE_CLANG=ON -DUSE_HLS=ON \
--DDEBUG_COMP_PRINT=ON -DDEBUG_PRINT=ON
+cmake -DLT_LLVM_INSTALL_DIR=$LLVM_DIR ../accProfPass -DUSE_CLANG=ON \
+   -DUSE_HLS=ON -DDEBUG_COMP_PRINT=ON -DDEBUG_PRINT=ON
 
 # Actually build the pass. It will be libAccProf.so in our case.
 make
@@ -56,19 +56,19 @@ make
 $LLVM_DIR/bin/clang -O1 -S -emit-llvm ../myLlvmPass/app.c -o app.ll
 
 # Use the plugin at the IR file. First case is for instrumentations passes
-$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt. -passes=accprof \
-app.ll -S -o derived.ll
+$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt \
+   -passes=accprof app.ll -S -o derived.ll
 
 # Second case is for analyses Passes
-$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt -passes=accprof \
- --functions-file=../accProfPass/functions.txt --events-file=../accProfPass/events.txt \
- -disable-output app.ll
+$LLVM_DIR/bin/opt -load-pass-plugin ./libAccProf.so functions.txt \
+   -passes=accprof --functions-file=../accProfPass/functions.txt \
+   --events-file=../accProfPass/events.txt -disable-output app.ll
 
 # To directly inject the pass through clang without using opt, run the command
 # below. Also for some reason this works even with -O0
-$LLVM_DIR/bin/clang -O0 -fplugin=./libAccProf.so -fpass-plugin=./libAccProf.so
- --functions-file=../accProfPass/functions.txt --events-file=../accProfPass/events.txt \
--g ../accProfPass/app.c -o app
+$LLVM_DIR/bin/clang -O0 -fplugin=./libAccProf.so -fpass-plugin=./libAccProf.so \
+   --functions-file=../accProfPass/functions.txt \
+   --events-file=../accProfPass/events.txt -g ../accProfPass/app.c -o app
 
 ```
 # Pass functionality. Current version: 1.9
@@ -77,13 +77,13 @@ hardware performance counters of the PMU results are stored as a conceptual
 format of a call-graph. The results of 6 events and cpu cycles are stored in
 each node of the call graph which represents a call instance of a profiling
 function. The pass operates on 2 modes. On the first mode, the pass injects
-instruction for writing to the HLS IP while on the second mode, it injects calls
-to the software implementation of the HLS IP. By uncommenting/commenting
-`#define USE_HLS` on can switch between those 2 modes. The define `DEBUG_PRINT`
-enables the injection of printfs with desired data in the program at runtime for
-debugging using the `insertPrint` function. The define `DEBUG_COMP_PRINT`
-enables the output of debug messages at pass injection during the compilation of
-an application using the `debug_errs` macro.
+instruction for writing to the HLS IP while on the second mode, it injects
+calls to the software implementation of the HLS IP. The `USE_HLS` can switch
+between those 2 modes. The define `DEBUG_PRINT` enables the injection of
+printfs with desired data in the program at runtime for debugging using the
+`insertPrint` function. The define `DEBUG_COMP_PRINT` enables the output of
+debug messages at pass injection during the compilation of an application using
+the `debug_errs` macro.
 
 a53 cores which run on ZCU102 support up to 6 simultaneous events to count plus
 CPU cycles. To choose the appropriate events, look over the a53 ARM TRM for
@@ -104,26 +104,26 @@ followed by a unique integer id 1-255 separated by space. Check
    them to inject call instructions to those functions.
 2. In the beginning of the main function it initializes the performance counters
    and sets them according to `events.txt`.
-3. It defines a function called `fprof_prolog`. This function writes the
+3. It defines a function called `accprof_prolog`. This function writes the
    profiling function ID and event IDs to the HLS. If `USE_HLS` is set, the pass
    spins on the idle bit of the hardware to make sure multiple writes will not
    overlap and corrupt the data.
-4. It defines a function called `fprof_epilog`. This function takes the current
+4. It defines a function called `accprof_epilog`. This function takes the current
    7 values of the local variables defined in the prologue. It reads the 6
    counters and the cycle counter and adds each result with the corresponding
    local variable and then assigns the sum to the corresponding global variable.
    It then writes the global values to the HLS hardware.
 The next steps apply for every function listed in `functions.txt`:
 1. In the function prologue the pass defines 7 local variables that to store
-   counted events and then calls `fprof_prolog`.
-2. After `fprog_epilog` counters are started to begin counting.
+   counted events and then calls `accprof_prolog`.
+2. After `accprog_epilog` counters are started to begin counting.
 3. In the body of each function, the pass searches for calls to those same
    functions. Before each call instruction, the pass stores the current event
    values since when the callee will be called, the counters will be reset. Then
    right after the call, the pass adds the callee's results to the currently
    stored values of the caller and resets the counters to resume execution.
 4. The pass then searchs for return instructions in the profiling function and
-   before each return instruction found, it injects a call to `fprof_epilog`.
+   before each return instruction found, it injects a call to `accprof_epilog`.
 5. For the software HLS mode, the pass prints the call graph in a csv format at
    epilogue of main.
 
@@ -131,11 +131,11 @@ The next steps apply for every function listed in `functions.txt`:
 The pass now accepts an additional `events.txt` file with the event names to use.
 This allows to compile the sel4 project to count different events without the
 need to recompile the pass. Starting the counters has been moved out of
-`fprof_prolog` to avoid counting extra events due to returning from it.
+`accprof_prolog` to avoid counting extra events due to returning from it.
 
 # Version 1.8 changes
 Prologue and epilogue instructions are put into two defined functions
-`fprof_prolog` and `fprof_epilog`. During function prologue and epilogue the
+`accprof_prolog` and `accprof_epilog`. During function prologue and epilogue the
 pass injects calls to those functions instead of dumping the same code again and
 again.
 

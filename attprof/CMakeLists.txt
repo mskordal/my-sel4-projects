@@ -40,6 +40,9 @@ endif()
 if (DEBUG_COMP_PRINT)
   add_definitions(-DDEBUG_COMP_PRINT)
 endif()
+if (DEBUG_PRINT)
+  add_definitions(-DDEBUG_PRINT)
+endif()
 add_definitions(-DCMAKE_EXPORT_COMPILE_COMMANDS)
 
 #===============================================================================

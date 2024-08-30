@@ -3,8 +3,18 @@
 /easy-settings.cmake
 /.sel4_cache/
 /kernel/
-/sel4build/
 /tools/
+
+#build directories 
+/build/
+/*build/
+
+#other directories used
+/prof-elfs/
+/att-elfs/
+/bitstreams/
+/results-prof/
+/results-att/
 
 # tags file
 tags
@@ -21,7 +31,6 @@ vivado*
 .Xil/
 
 # clang/llvm auto-generated files
-llvmpassbuild/
 *.ll
 *.so
 
