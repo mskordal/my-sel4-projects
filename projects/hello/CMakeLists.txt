@@ -20,16 +20,18 @@ elfloader_import_project()
 find_package(musllibc REQUIRED)
 find_package(util_libs REQUIRED)
 find_package(seL4_libs REQUIRED)
+find_package(sha256 REQUIRED)
 
 # This sets up environment build flags and imports musllibc and runtime libraries.
 musllibc_setup_build_environment_with_sel4runtime()
 sel4_import_libsel4()
 util_libs_import_libraries()
 sel4_libs_import_libraries()
+sha256_import_library()
 
 add_executable(hello src/hello.c)
 
-target_link_libraries(hello sel4muslcsys  muslc)
+target_link_libraries(hello sel4muslcsys  muslc sha256)
 
 include(rootserver)
 DeclareRootserver(hello)

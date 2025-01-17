@@ -63,3 +63,17 @@ libstatemate_body 20
 libud_body 21
 libwikisort_body 22
 tarfind_body 23
+
+## basicmath
+SolveCubic 2
+usqrt 3
+
+## bitcount
+bit_count 2
+bitcount 3
+ntbl_bitcnt 4
+ntbl_bitcount 5
+BW_btbl_bitcount 6
+AR_btbl_bitcount 7
+bit_shifter 8
+

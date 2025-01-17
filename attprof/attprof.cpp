@@ -3,8 +3,9 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <iostream> //TODO: for debugging. Remove later
 #include <fstream>	//to read files with function names
@@ -35,6 +36,7 @@ using namespace llvm;
 /** The virtual address corresponding to the HLS IP. Mapped by the app */
 #define HLS_VIRT_ADDR 0x10000000 ///< virtual address for our test app
 #define BRAM_VIRT_ADDR 0x10001000 ///< virtual address for our test app
+#define DISABLE_EL1_EVENT_COUNT 0x80000000
 
 #define TAKES_VAR_ARGS true
 #define SHA256_BLOCK_SIZE 32            // SHA256 outputs a 32 byte digest
@@ -253,39 +255,45 @@ PreservedAnalyses AttProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	create_extern_func_declarations(M, ctx);
 	
 	std::string absolut_filename = M.getName().str();
-	std::string src_filename = std::filesystem::path(absolut_filename).filename().
-		replace_extension("").string();
-	debug_errs("filename of Module: " << src_filename << "\n");
+	std::string src_fname = std::filesystem::path(absolut_filename).
+		filename().replace_extension("").string();
+	debug_errs("filename of Module: " << src_fname << "\n");
 
 	// Create the global variable for the hls address
 	Type *i64_ptr_typ = Type::getInt64PtrTy(ctx);
 	hls_global_var = new GlobalVariable(M, i64_ptr_typ, false,
-		GlobalValue::ExternalLinkage, nullptr, src_filename + "-hlsptr");
-	ConstantInt *hls_virt_addr_val = ConstantInt::get(ctx, APInt(64, HLS_VIRT_ADDR));
-	Constant *hls_virt_addr_ptr = ConstantExpr::getIntToPtr(hls_virt_addr_val, i64_ptr_typ);
+		GlobalValue::ExternalLinkage, nullptr, src_fname + "-hlsptr");
+	ConstantInt *hls_virt_addr_val = ConstantInt::get(ctx,
+		APInt(64, HLS_VIRT_ADDR));
+	Constant *hls_virt_addr_ptr = ConstantExpr::getIntToPtr(hls_virt_addr_val,
+		i64_ptr_typ);
 	hls_global_var->setAlignment(Align(8));
 	hls_global_var->setInitializer(hls_virt_addr_ptr);
 
 	// Create the global variable for the bram address
 	i64_ptr_typ = Type::getInt64PtrTy(ctx);
 	bram_global_var = new GlobalVariable(M, i64_ptr_typ, false,
-		GlobalValue::ExternalLinkage, nullptr, src_filename + "-bramptr");
-	ConstantInt *bram_virt_addr_val = ConstantInt::get(ctx, APInt(64, BRAM_VIRT_ADDR));
-	Constant *bram_virt_addr_ptr = ConstantExpr::getIntToPtr(bram_virt_addr_val, i64_ptr_typ);
+		GlobalValue::ExternalLinkage, nullptr, src_fname + "-bramptr");
+	ConstantInt *bram_virt_addr_val = ConstantInt::get(ctx,
+		APInt(64, BRAM_VIRT_ADDR));
+	Constant *bram_virt_addr_ptr = ConstantExpr::getIntToPtr(bram_virt_addr_val,
+		i64_ptr_typ);
 	bram_global_var->setAlignment(Align(8));
 	bram_global_var->setInitializer(bram_virt_addr_ptr);
 
-	// Global array to get the counter values to be passed to create_key function
-	ArrayType* arr6_i64_typ = ArrayType::get(Type::getInt64Ty(ctx), COUNTERS_NUM);
+	// Global array to get the counter values passed to create_key function
+	ArrayType* arr6_i64_typ = ArrayType::get(Type::getInt64Ty(ctx),
+		COUNTERS_NUM);
 	Constant *arr6_i64_init = ConstantAggregateZero::get(arr6_i64_typ);
-	counters_glob_arr = new GlobalVariable(M, arr6_i64_typ,
-		true, GlobalValue::ExternalLinkage, arr6_i64_init, "counters");
+	counters_glob_arr = new GlobalVariable(M, arr6_i64_typ, true,
+		GlobalValue::ExternalLinkage, arr6_i64_init, src_fname + "counters");
 	counters_glob_arr->setAlignment(Align(8));
 
 	// Similarly for event shifts. Here we initialise the array with the values
 	// since we cant get them dynamically. Pass a row to each create_key call
 	arr6_i32_typ = ArrayType::get(Type::getInt32Ty(ctx), COUNTERS_NUM);
-	ArrayType* arr2d_i32_typ = ArrayType::get(arr6_i32_typ, event_shifts.size()); 
+	ArrayType* arr2d_i32_typ = ArrayType::get(arr6_i32_typ,
+		event_shifts.size()); 
 	Constant* event_shift_vals[event_shifts.size()];
 	for(int row = 0; row < event_shifts.size(); row++)
 	{
@@ -300,8 +308,9 @@ PreservedAnalyses AttProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	}
 	Constant *event_shift_arr_init = ConstantArray::get(arr2d_i32_typ,
 		ArrayRef<Constant*>(event_shift_vals, event_shifts.size()));
-	event_shift_glob_arr = new GlobalVariable(M, arr2d_i32_typ,
-		true, GlobalValue::ExternalLinkage, event_shift_arr_init, "event_shifts");
+	event_shift_glob_arr = new GlobalVariable(M, arr2d_i32_typ, true,
+		GlobalValue::ExternalLinkage, event_shift_arr_init,
+		src_fname + "event_shifts");
 	event_shift_glob_arr->setAlignment(Align(4));
 
 	// Also create a global index to access each row of the event_shift global
@@ -309,14 +318,15 @@ PreservedAnalyses AttProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	idx_typ = Type::getInt32Ty(ctx);
 	event_shift_glob_idx = new GlobalVariable(M, idx_typ, false,
 		GlobalValue::ExternalLinkage, ConstantInt::get(idx_typ, 0),
-		"event_shift_i");
+		src_fname + "event_shift_i");
+
 	// Create the global variables for the cpu cycles and the 6 events
 	// TODO: The counter global array can eventually replace them
 	for (int event_idx = 0; event_idx < TOTAL_EVENTS; event_idx++)
 	{
 		event_global_vars[event_idx] = new GlobalVariable(M,
 			Type::getInt64Ty(ctx), false, GlobalValue::ExternalLinkage,
-			nullptr, src_filename + "-ev" + std::to_string(event_idx));
+			nullptr, src_fname + "-ev" + std::to_string(event_idx));
 		event_global_vars[event_idx]->setDSOLocal(true);
 		event_global_vars[event_idx]->setAlignment(Align(8));
 		event_global_vars[event_idx]->setInitializer(
@@ -336,15 +346,18 @@ PreservedAnalyses AttProfMod::run(Module &M, ModuleAnalysisManager &AM)
 #endif
 		// Call counter itialisation functions
 		main_builder.CreateCall(decl_funcs[SEL4BENCH_INIT]);
+
+		// For every counter
 		for (int event_idx = 0; event_idx < TOTAL_EVENTS - 1; ++event_idx)
 		{
-			Value *s4bsceArgs[2] =
+			// Set the corresponding event to count
+			Value *event_args[2] =
 			{
 				ConstantInt::get(ctx, APInt(64, event_idx)),
 				ConstantInt::get(ctx, APInt(64, event_pmu_codes[event_idx]))
 			};
-			main_builder.CreateCall(
-				decl_funcs[SEL4BENCH_SET_COUNT_EVENT], s4bsceArgs);
+			main_builder.CreateCall(decl_funcs[SEL4BENCH_SET_COUNT_EVENT],
+				event_args);
 		}
 		debug_errs("main prologue instrumentation done!!");
 
@@ -372,8 +385,8 @@ PreservedAnalyses AttProfMod::run(Module &M, ModuleAnalysisManager &AM)
 				hls_global_var->getValueType(), hls_global_var);
 			Value *hls_bram_idx = main_builder.CreateConstInBoundsGEP1_32(
 				Type::getInt32Ty(ctx), hls_base_addr, 16);
-			main_builder.CreateStore(ConstantInt::get(ctx, APInt(32, BRAM_ADDR)),
-				hls_bram_idx);
+			main_builder.CreateStore(ConstantInt::get(ctx, APInt(32,
+				BRAM_ADDR)), hls_bram_idx);
 
 			//Trigger top function
 			hls_base_addr = main_builder.CreateLoad(
@@ -385,6 +398,35 @@ PreservedAnalyses AttProfMod::run(Module &M, ModuleAnalysisManager &AM)
 			Value *ctrl_sig_val_start = main_builder.CreateOr(ctrl_sig_val,
 				ConstantInt::get(ctx, APInt(32, 0x1)));
 			main_builder.CreateStore(ctrl_sig_val_start, ctrl_sig_idx);
+		}
+
+		std::vector<Instruction *> ret_instrs = get_ret_instrs(main_func);
+		for (Instruction *instr : ret_instrs)
+		{
+			BasicBlock *bblk = instr->getParent();
+			Instruction *firstInstr = bblk->getFirstNonPHI();
+			if (firstInstr != instr)
+				bblk = SplitBlock(bblk, instr);
+			IRBuilder<> builder(bblk, bblk->begin());
+
+			// Write BRAM address to HLS
+			LoadInst *hls_base_addr = builder.CreateLoad(
+				hls_global_var->getValueType(), hls_global_var);
+			Value *hls_bram_addr = builder.CreateConstInBoundsGEP1_64(
+				Type::getInt32Ty(ctx), hls_base_addr, 16);
+			builder.CreateStore(ConstantInt::get(ctx, APInt(32, BRAM_ADDR)),
+				hls_bram_addr);
+
+			//Trigger top function
+			hls_base_addr = builder.CreateLoad( hls_global_var->getValueType(),
+				hls_global_var);
+			Value *ctrl_sig_idx = builder.CreateConstInBoundsGEP1_32(
+				Type::getInt32Ty(ctx), hls_base_addr, 0);
+			LoadInst *ctrl_sig_val = builder.CreateLoad( Type::getInt32Ty(ctx),
+				ctrl_sig_idx);
+			Value *ctrl_sig_val_start = builder.CreateOr(ctrl_sig_val,
+				ConstantInt::get(ctx, APInt(32, 0x1)));
+			builder.CreateStore(ctrl_sig_val_start, ctrl_sig_idx);
 		}
 	}
 
@@ -467,6 +509,14 @@ void inject_local_allocs_rst_counters(IRBuilder<> *builder, LLVMContext &ctx)
 		builder->CreateStore(ConstantInt::get(ctx, APInt(64, 0)),
 			event_local_vars[i]);
 	}
+
+	// Insert instruction/data sync barriers
+	InlineAsm *dsb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "dsb sy", "", true);
+	InlineAsm *isb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "isb", "", true);
+	builder->CreateCall(dsb_asm);
+	builder->CreateCall(isb_asm);
 
 	// reset/start counters
 	builder->CreateCall(decl_funcs[SEL4BENCH_RESET_COUNTERS]);
@@ -576,13 +626,13 @@ BasicBlock *create_wr_hash_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
 	}
 	// get the ptr to the event shift row
 	Value *idx_val = builder.CreateLoad(idx_typ, event_shift_glob_idx);
-	Value *event_shift_row = builder.CreateGEP(arr6_i32_typ, event_shift_glob_arr,
-		{idx_val});
+	Value *event_shift_row = builder.CreateGEP(arr6_i32_typ,
+		event_shift_glob_arr, {idx_val});
 
 	// Create struct for key and get pointer to it
 	AllocaInst *attkey_var = builder.CreateAlloca(attkey_typ);
-	Value *attkey_ptr = builder.CreateBitCast(attkey_var, Type::getInt8PtrTy(ctx),
-		"attkey_ptr");
+	Value *attkey_ptr = builder.CreateBitCast(attkey_var,
+		Type::getInt8PtrTy(ctx), "attkey_ptr");
 
 	// Generate hash result
 	builder.CreateCall(decl_funcs[CREATE_ATTKEY],
@@ -591,7 +641,8 @@ BasicBlock *create_wr_hash_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
 		{attkey_var, nonce_val});
 
 	// Increment the index value
-	Value *idx_val_plus = builder.CreateAdd(idx_val, ConstantInt::get(idx_typ, 1));
+	Value *idx_val_plus = builder.CreateAdd(idx_val,
+		ConstantInt::get(idx_typ, 1));
 	builder.CreateStore(idx_val_plus, event_shift_glob_idx);
 
 	// Write hash result to hls corresponding bytes
@@ -599,7 +650,8 @@ BasicBlock *create_wr_hash_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
 	{
 		Value *res_hash_idx = builder.CreateConstInBoundsGEP1_32(
 			Type::getInt8Ty(ctx), res_hash, i);
-		Value *hash_byte = builder.CreateLoad(Type::getInt8Ty(ctx), res_hash_idx);
+		Value *hash_byte = builder.CreateLoad(Type::getInt8Ty(ctx),
+			res_hash_idx);
 		hls_base_addr = builder.CreateLoad(
 			hls_global_var->getValueType(), hls_global_var);
 		Value *hls_hash_idx = builder.CreateConstInBoundsGEP1_32(
@@ -692,6 +744,14 @@ void inject_add_counters_to_locals(BasicBlock *bblk, LLVMContext &ctx)
 	debug_errs(__func__<< ": " << bblk->getParent()->getName().str() << ": Enter");
 	CallInst *countEventVals[TOTAL_EVENTS];
 
+	// Put synchronisation barriers before collecting results
+	InlineAsm *dsb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "dsb sy", "", true);
+	InlineAsm *isb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "isb", "", true);
+	builder.CreateCall(dsb_asm);
+	builder.CreateCall(isb_asm);
+
 	// Create call inst to sel4bench_get_cycle_count to get cpu cycles count
 	countEventVals[CPU_CYCLES] = builder.CreateCall(
 		decl_funcs[SEL4BENCH_GET_CYCLE_COUNT]);
@@ -738,6 +798,14 @@ BasicBlock *create_wr_metrics_to_globals_bblk(Function *func, LLVMContext &ctx)
 		+ ">>: START", nullptr, *bblk->getModule());
 #endif
 	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
+
+	// Put synchronisation barriers before collecting results
+	InlineAsm *dsb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "dsb sy", "", true);
+	InlineAsm *isb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "isb", "", true);
+	builder.CreateCall(dsb_asm);
+	builder.CreateCall(isb_asm);
 
 	CallInst *countEventVals[TOTAL_EVENTS];
 	// Create call inst to sel4bench_get_cycle_count to get cpu cycles count
@@ -942,10 +1010,11 @@ Function* create_epilog_func(Module &M, LLVMContext &ctx)
 	Function* epilog_func = Function::Create(epilog_func_type,
 		Function::ExternalLinkage, "attprof_epilog", &M);
 	std::string absolut_path_filename = M.getName().str();
-	std::string src_filename = std::filesystem::path(absolut_path_filename).
+	std::string src_fname = std::filesystem::path(absolut_path_filename).
 		filename().replace_extension("").string();
 	
-	if(src_filename == "main")
+	//if(src_fname == "main")
+	if(src_fname.find("main") != std::string::npos)
 	{	// create blocks
 		BasicBlock *entry_bblk = BasicBlock::Create(ctx, "", epilog_func);
 		IRBuilder<> entry_bblk_builder(entry_bblk, entry_bblk->begin());

@@ -6,10 +6,10 @@ if [ -z "$1" ] || [ -z "$2" ]; then
 	exit 1
 fi
 
-DIR="$1"
+dir="$1"
 mapfile -t event_names < "$2"
 # Iterate over each .txt file in the directory
-for txt_file in "$DIR"/*.txt; do
+for txt_file in "$dir"/*.txt; do
 	# Check if there are no .txt files
 	if [ ! -e "$txt_file" ]; then
 		echo "No .txt files found in the directory."

@@ -43,20 +43,11 @@ void print_attkey(attkey_t* key)
 
 	tmp_idx = key->subkey_idx;
 	printf("key(hex): ");
-	printf("%x",  key->key[tmp_idx--]);
 	while(tmp_idx >= 0)
 	{
-		printf("%x", key->key[tmp_idx--]);
+		printf("%x-", key->key[tmp_idx--]);
 	}
 	printf("\n");
-	/*tmp_idx = key->subkey_idx;*/
-	/*printf("key(bin): ");*/
-	/*print_bin(key->key[tmp_idx--]);*/
-	/*while(tmp_idx >= 0)*/
-	/*{*/
-		/*print_bin(key->key[tmp_idx--]);*/
-	/*}*/
-	/*printf("\n");*/
 }
 
 void store_counter_to_key(uint64_t counter, attkey_t *key)
@@ -116,6 +107,7 @@ void create_attkey(attkey_t *attkey, uint64_t *counters, int *event_shifts)
 	uint64_t stable_counter;
 	int event;
 
+	/*printf("Stable bits gathered:\n");*/
 	memset(attkey, 0, sizeof(attkey_t));
 	for(event = 0; event < TOTAL_EVENTS; event++)
 	{
@@ -126,3 +118,4 @@ void create_attkey(attkey_t *attkey, uint64_t *counters, int *event_shifts)
 	/*printf("\n");*/
 	/*print_attkey(attkey);*/
 }
+

@@ -1,4 +1,4 @@
-# profiling
+# Cache metrics 03-01-05-02-17-18
 L1D_CACHE_REFILL
 L1I_CACHE_REFILL
 L1D_TLB_REFILL
@@ -14,7 +14,7 @@ LD_RETIRED
 ST_RETIRED
 BR_MIS_PRED
 
-# stream experiment 1
+# Stable metrics 12-08-06-07-0A-0D
 BR_PRED
 INST_RETIRED
 LD_RETIRED

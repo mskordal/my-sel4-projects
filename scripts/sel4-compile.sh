@@ -1,8 +1,12 @@
 #!/bin/bash
 
-# $1: The relative path to the LLVM pass used. 
-# $2: The relative path to the text file containting the list of functions to be
-# profiled.
+# $1: Path to the pass file
+# $2: Path to the functions file
+# $3: Path to the events file
+# $4: Path to the event-shifts file (attestation only)
+# $5: Path to the keys file (attestation only)
+# $6: Boolean: set to compile large project (mibench only)
+set -e
 
 # Check if the directory name is exactly "build" or ends with "build"
 if [[ ! $(basename "$PWD") =~ build$ ]]; then
@@ -22,12 +26,7 @@ fi
 export LLVM_DIR=/usr/lib/llvm-15
 export LLVM_SYMBOLIZER_PATH=$LLVM_DIR/bin/llvm-symbolizer
 rm -rf ./*
-if [[ "$#" -eq 3 || "$#" -eq 4 ]]; then # profiling pass
-	../init-build.sh -DPLATFORM=zcu102 -DTRIPLE=aarch64-linux-gnu \
-		-DLLVMPass=$1 -DFunctionsFile=$2 -DEventsFile=$3 -DProfMetaFile=$4
-elif [ "$#" -eq 5 ]; then # attestation pass
-	../init-build.sh -DPLATFORM=zcu102 -DTRIPLE=aarch64-linux-gnu \
-		-DLLVMPass=$1 -DFunctionsFile=$2 -DEventsFile=$3 -DEventShiftsFile=$4 \
-		-DKeysFile=$5
-fi
+../init-build.sh -DPLATFORM=zcu102 -DTRIPLE=aarch64-linux-gnu \
+	-DLLVMPass=$1 -DFunctionsFile=$2 -DEventsFile=$3 -DEventShiftsFile=$4 \
+	-DKeysFile=$5 -DCompileLarge=$6
 ninja

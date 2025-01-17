@@ -3,8 +3,9 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <iostream> //TODO: for debugging. Remove later
 #include <fstream>	//to read files with function names
@@ -20,18 +21,19 @@ using namespace llvm;
 	#define debug_errs(str)
 #endif
 
-#define BRAM_ADDRESS 0xa0040000
+#define BRAM_ADDR 0xa0040000
 #define HLS_VIRT_ADDR 0x10000000 ///< virtual address for our test app
+#define DISABLE_EL1_EVENT_COUNT 0x80000000
 
 #define COUNTERS_NUM 6
 
 
 void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
 	Function *prolog_func, LLVMContext &ctx);
-BasicBlock *create_spinlock_idle_bit_bblk(BasicBlock *nextBblk, Function *func,
-	LLVMContext &ctx, Value **is_idle_bit_0_val);
+BasicBlock *create_spinlock_idle_bit_bblk(AllocaInst *ctrl_sig_var,
+	Function *func, LLVMContext &ctx, Value **is_idle_bit_0_val);
 BasicBlock *create_wr_fid_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
-	LLVMContext &ctx, int id);
+	LLVMContext &ctx);
 BasicBlock *create_wr_metrics_to_hls_bblk(AllocaInst *ctrl_sig_var,
 	Function *func, LLVMContext &ctx);
 BasicBlock *create_wr_metrics_to_globals_bblk(Function *func, LLVMContext &ctx);
@@ -43,12 +45,9 @@ std::vector<Instruction *> get_ret_instrs(Function *func);
 Function *create_prolog_func(int funcID, Module &M, LLVMContext &ctx);
 Function* create_epilog_func(Module &M, LLVMContext &ctx);
 void create_extern_func_declarations(Module &M, LLVMContext &ctx);
-int get_event_id(std::string event_name);
+int  get_event_id(std::string event_name);
 #ifdef DEBUG_PRINT
 void insertPrint(IRBuilder<> &builder, std::string msg, Value *val, Module &M);
-#endif
-#ifdef USE_SEL4BENCH
-	std::vector<Instruction *> getTermInst(Function *func);
 #endif
 
 //cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required);
@@ -56,8 +55,6 @@ cl::opt<std::string> func_name_ifname("functions-file",
 	cl::desc("<functions input file>"), cl::Required);
 cl::opt<std::string> event_name_ifname("events-file",
 	cl::desc("<events input file>"), cl::Required);
-cl::opt<std::string> prof_meta_ifname("prof-meta-file",
-	cl::desc("<profiling metadata input file>"));
 
 enum eventIndices
 {
@@ -89,17 +86,12 @@ enum decl_funcs
 };
 
 int event_pmu_codes[TOTAL_EVENTS - 1];
-int func_calls; ///< set to 1 on 1st prof exec. After that set to real num
 
 GlobalVariable *hls_global_var;
 
 /** 64bit cpu cycles, 64bit event 0-5 */
 GlobalVariable *event_global_vars[TOTAL_EVENTS]; ///< Globals: events0-5 & cpu
 AllocaInst *event_local_vars[TOTAL_EVENTS]; ///< Locals: events0-5 & cpu
-//GlobalVariable *event_shift_glob_arr;
-//ArrayType* arr6_i32_typ;
-
-
 
 std::string decl_func_names[TOTAL_DECL_FUNCS] =
 {
@@ -124,11 +116,9 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 {
 	std::ifstream *func_name_ifstream;
 	std::ifstream *event_name_ifstream;
-	std::ifstream *prof_meta_ifstream;
 	std::string line;
 	std::vector<std::string> func_names;
 	std::vector<int> func_ids;
-	//std::vector<uint32_t> event_shifts;
 
 	if (func_name_ifname.getNumOccurrences() > 0)
 	{
@@ -169,20 +159,6 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	{
 		errs() << "List of events to count was not provided";
 		exit(1);
-	}
-	if (prof_meta_ifname.getNumOccurrences() > 0)
-	{
-		prof_meta_ifstream = new std::ifstream(prof_meta_ifname);
-		std::getline(*prof_meta_ifstream, line);
-		func_calls = std::stoi(line);
-		errs() << "List of profling metadata:";
-		errs() << "func_calls: " << func_calls;
-	}
-	else
-	{
-		func_calls = 1;
-		errs() << "List of profling metadata was not provided";
-		errs() << "func_calls: 1";
 	}
 
 #ifdef DEBUG_PRINT
@@ -226,21 +202,6 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	// Set the initial value of the global variable. Overwrites if existing
 	hls_global_var->setInitializer(PtrVal);
 
-	// Initialize a random global array of 6 elements for event shifts
-	//arr6_i32_typ = ArrayType::get(Type::getInt32Ty(ctx), COUNTERS_NUM);
-	//Constant *event_shift_arr_init = ConstantArray::get(arr6_i32_typ,
-		//{
-			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
-			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
-			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
-			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
-			//ConstantInt::get(ctx, APInt(32, rand() % 8)),
-			//ConstantInt::get(ctx, APInt(32, rand() % 8))
-		//});
-	//event_shift_glob_arr = new GlobalVariable(M, arr6_i32_typ, true,
-		//GlobalValue::ExternalLinkage, event_shift_arr_init, "event_shifts");
-	//event_shift_glob_arr->setAlignment(Align(4));
-
 	// Create the global variables for the cpu cycles and the 6 events
 	for (int i = 0; i < TOTAL_EVENTS; i++)
 	{
@@ -270,16 +231,17 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 #endif
 		mainBuilder.CreateCall(decl_funcs[SEL4BENCH_INIT]);
 
-		// Create 6 call instructions to sel4bench_set_count_event
-		for (int i = 0; i < 6; ++i)
+		// For every counter
+		for (int i = 0; i < TOTAL_EVENTS - 1; ++i)
 		{
-			Value *s4bsceArgs[2] =
+			// Set the corresponding event to count and disable kernel count
+			Value *event_args[2] =
 			{
 				ConstantInt::get(ctx, APInt(64, i)),
 				ConstantInt::get(ctx, APInt(64, event_pmu_codes[i]))
 			};
 			mainBuilder.CreateCall(decl_funcs[SEL4BENCH_SET_COUNT_EVENT],
-				s4bsceArgs);
+				event_args);
 		}
 		debug_errs("main prologue instrumentation done!!");
 	}
@@ -339,14 +301,8 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 		debug_errs(func_names.at(i) << " instrumentation done!!");
 	}
 	if(main_func)
-	{
-	// If we are on software mode, print results to console
-#ifndef USE_HLS
-#ifdef USE_SEL4BENCH
-		std::vector<Instruction *> retInsts = getTermInst(main_func);
-#else
+	{// Find return instructions of main
 		std::vector<Instruction *> retInsts = get_ret_instrs(main_func);
-#endif
 		for (Instruction *instr : retInsts)
 		{
 			BasicBlock *bblk = instr->getParent();
@@ -354,9 +310,39 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 			if (firstInstr != instr)
 				bblk = SplitBlock(bblk, instr);
 			
-			IRBuilder<> endBuilder(bblk, bblk->begin());
-			endBuilder.CreateCall(decl_funcs[accprofSoftPrintFunc]);
+			IRBuilder<> builder(bblk, bblk->begin());
+#ifndef USE_HLS // if running in software mode, print results to console
+			builder.CreateCall(decl_funcs[accprofSoftPrintFunc]);
+#else // else send signal to hls that the applications has finished
+			// Fill the LS byte with 1 to indicate termination
+			LoadInst *hls_base_addr = builder.CreateLoad(
+				hls_global_var->getValueType(), hls_global_var);
+			Value *hls_id_ls_addr = builder.CreateConstInBoundsGEP1_64(
+				IntegerType::getInt32Ty(ctx), hls_base_addr, 4);
+			builder.CreateStore(ConstantInt::get(ctx, llvm::APInt(32, 0xff)),
+				hls_id_ls_addr);
+
+			// Write BRAM address to HLS
+			hls_base_addr = builder.CreateLoad(hls_global_var->getValueType(),
+				hls_global_var);
+			Value *hls_bram_addr = builder.CreateConstInBoundsGEP1_64(
+				IntegerType::getInt32Ty(ctx), hls_base_addr, 36);
+			builder.CreateStore(ConstantInt::get(ctx, APInt(32, BRAM_ADDR)),
+				hls_bram_addr);
+
+			//Trigger top function
+			hls_base_addr = builder.CreateLoad( hls_global_var->getValueType(),
+				hls_global_var);
+			Value *ctrl_sig_idx = builder.CreateConstInBoundsGEP1_32(
+				Type::getInt32Ty(ctx), hls_base_addr, 0);
+			LoadInst *ctrl_sig_val = builder.CreateLoad( Type::getInt32Ty(ctx),
+				ctrl_sig_idx);
+			Value *ctrl_sig_val_start = builder.CreateOr(ctrl_sig_val,
+				ConstantInt::get(ctx, APInt(32, 0x1)));
+			builder.CreateStore(ctrl_sig_val_start, ctrl_sig_idx);
+#endif
 		}
+#ifndef USE_HLS
 		debug_errs(decl_func_names[accprofSoftPrintFunc]
 			<< " instrumentation done!!");
 #endif
@@ -378,8 +364,7 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
 	Function *prolog_func, LLVMContext &ctx)
 {
-	debug_errs(__func__<< ": " << bblk->getParent()->getName().str()
-		<< ": Enter");
+	debug_errs(__func__<< ": func id: " << func_id << ": Enter");
 
 	IRBuilder<> builder(bblk, bblk->begin());
 
@@ -399,6 +384,14 @@ void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
 	Value *prolog_funcArg[1] = {ConstantInt::get(ctx, APInt(32, func_id))};
 	builder.CreateCall(prolog_func, prolog_funcArg);
 
+	// Insert instruction/data sync barriers
+	InlineAsm *dsb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "dsb sy", "", true);
+	InlineAsm *isb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "isb", "", true);
+	builder.CreateCall(dsb_asm);
+	builder.CreateCall(isb_asm);
+
 	// reset/start counters
 	builder.CreateCall(decl_funcs[SEL4BENCH_RESET_COUNTERS]);
 	Value *start_counter_arg[1] = {ConstantInt::get(ctx, APInt(64, 0x3F))};
@@ -414,9 +407,7 @@ void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
 		bblk->getParent()->getName().str() + ">>: END", nullptr,
 		*bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << bblk->getParent()->getName().str()
-		<< ": Enter");
-
+	debug_errs(__func__<< ": func id: " << func_id << ": Exit");
 }
 
 
@@ -431,7 +422,7 @@ void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
 BasicBlock *create_spinlock_idle_bit_bblk(AllocaInst *ctrl_sig_var,
 	Function *func, LLVMContext &ctx, Value **is_idle_bit_0_val)
 {
-	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
+	debug_errs(__func__<< ": " << ": Enter");
 	BasicBlock *bblk = BasicBlock::Create(ctx, "", func);
 	IRBuilder<> builder(bblk, bblk->begin());
 #ifdef DEBUG_PRINT
@@ -476,7 +467,7 @@ BasicBlock *create_spinlock_idle_bit_bblk(AllocaInst *ctrl_sig_var,
  * @return The block created
  */
 BasicBlock *create_wr_fid_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
-	LLVMContext &ctx, int id)
+	LLVMContext &ctx)
 {
 
 	int event_ids_ls;
@@ -489,7 +480,7 @@ BasicBlock *create_wr_fid_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
 		+ ">>: START", nullptr, *bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
+	debug_errs(__func__ << ": Enter");
 
 #ifdef USE_HLS
 	// Write the first 3 event IDs and func ID to the corresponding HLS address
@@ -535,7 +526,7 @@ BasicBlock *create_wr_fid_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
 #ifdef DEBUG_PRINT
 	insertPrint(builder, "\thls bram: ", hls_bram_addr, *bblk->getModule());
 #endif
-	builder.CreateStore(ConstantInt::get(ctx, llvm::APInt(32, BRAM_ADDRESS)),
+	builder.CreateStore(ConstantInt::get(ctx, llvm::APInt(32, BRAM_ADDR)),
 		hls_bram_addr);
 
 	// Trigger top function by setting the start bit
@@ -579,7 +570,7 @@ BasicBlock *create_wr_fid_to_hls_bblk(AllocaInst *ctrl_sig_var, Function *func,
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
 		+ ">>: END", nullptr, *bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << func->getName().str() << ": Exit");
+	debug_errs(__func__ << ": Exit");
 	return bblk;
 }
 
@@ -603,7 +594,7 @@ BasicBlock *create_wr_metrics_to_hls_bblk(AllocaInst *ctrl_sig_var,
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
 		+ ">>: START", nullptr, *bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
+	debug_errs(__func__ << ": Enter");
 
 #ifdef USE_HLS
 	// Create a load inst to read the address of the global pointer variable
@@ -720,7 +711,7 @@ BasicBlock *create_wr_metrics_to_hls_bblk(AllocaInst *ctrl_sig_var,
 	// Create a Store inst to store the bram address to the 6th index from
 	// the HLS base address which is the bram parameter
 	builder.CreateStore(
-		ConstantInt::get(ctx, llvm::APInt(32, BRAM_ADDRESS)), hlsAddr36);
+		ConstantInt::get(ctx, llvm::APInt(32, BRAM_ADDR)), hlsAddr36);
 
 	/**
 	 * Write value 0x1 to the control signals.
@@ -756,7 +747,7 @@ BasicBlock *create_wr_metrics_to_hls_bblk(AllocaInst *ctrl_sig_var,
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
 		+ ">>: END", nullptr, *bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << func->getName().str() << ": Exit");
+	debug_errs(__func__ << ": Exit");
 	return bblk;
 }
 
@@ -841,6 +832,14 @@ void inject_add_counters_to_locals(BasicBlock *bblk, LLVMContext &ctx)
 	debug_errs(__func__<<": "<<bblk->getParent()->getName().str()<<": Enter");
 	CallInst *countEventVals[TOTAL_EVENTS];
 
+	// Put synchronisation barriers before collecting results
+	InlineAsm *dsb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "dsb sy", "", true);
+	InlineAsm *isb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "isb", "", true);
+	builder.CreateCall(dsb_asm);
+	builder.CreateCall(isb_asm);
+
 	// Create call inst to sel4bench_get_cycle_count to get cpu cycles count
 	countEventVals[CPU_CYCLES] = builder.CreateCall(
 		decl_funcs[SEL4BENCH_GET_CYCLE_COUNT]);
@@ -886,7 +885,15 @@ BasicBlock *create_wr_metrics_to_globals_bblk(Function *func, LLVMContext &ctx)
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
 		+ ">>: START", nullptr, *bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
+	debug_errs(__func__<< ": Enter");
+
+	// Put synchronisation barriers before collecting results
+	InlineAsm *dsb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "dsb sy", "", true);
+	InlineAsm *isb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
+		false), "isb", "", true);
+	builder.CreateCall(dsb_asm);
+	builder.CreateCall(isb_asm);
 
 	CallInst *countEventVals[TOTAL_EVENTS];
 	// Create call inst to sel4bench_get_cycle_count to get cpu cycles count
@@ -925,7 +932,7 @@ BasicBlock *create_wr_metrics_to_globals_bblk(Function *func, LLVMContext &ctx)
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
 		+ ">>: END", nullptr, *bblk->getModule());
 #endif
-	debug_errs(__func__<< ": " << func->getName().str() << ": Exit");
+	debug_errs(__func__<< ": Exit");
 	return bblk;
 }
 
@@ -1013,38 +1020,6 @@ std::vector<Instruction *> get_ret_instrs(Function *func)
 }
 
 
-#ifdef USE_SEL4BENCH
-std::vector<Instruction *> getTermInst(Function *func)
-{
-	debug_errs(__func__<< ": " << func->getName().str() << ": Enter");
-
-	std::vector<Instruction *> retInsts;
-
-	for (Function::iterator bblk = func->begin(); bblk != func->end(); ++bblk)
-	{
-		for (BasicBlock::iterator instr = bblk->begin(); instr != bblk->end();
-			++instr)
-		{
-			CallInst *callInst = dyn_cast<CallInst>(&*instr);
-			if (callInst)
-			{
-				Function *calledFunction = callInst->getCalledFunction();
-				if(calledFunction != nullptr) //.equals(StringRef("", 0))
-				{
-					if(calledFunction->getName().str() == "benchmark_finished")
-					{
-						retInsts.push_back(&*instr);
-					}
-				}
-			}
-		}
-	}
-	debug_errs(__func__<< ": " << func->getName().str() << ": Exit");
-	return retInsts;
-}
-#endif
-
-
 /**
  * Defines a function to which call instructions will be injected by the pass,
  * at the prologue of each function that will be profiled.
@@ -1067,8 +1042,10 @@ Function* create_prolog_func(int funcID, Module &M, LLVMContext &ctx)
 	std::string src_filename = std::filesystem::path(absolut_filename).
 		filename().replace_extension("").string();
 	// define function only once in main.c
-	if(src_filename == "main")
+	//if(src_filename == "main")
+	if(src_filename.find("main") != std::string::npos)
 	{	// create blocks
+		errs() << "\n\n\n\nAdding accprof body in file" << src_filename << "\n\n\n\n";
 		BasicBlock *entry_bblk = BasicBlock::Create(ctx, "", prolog_func);
 		IRBuilder<> entry_bblk_builder(entry_bblk, entry_bblk->begin());
 		AllocaInst* ctrl_sig_var = entry_bblk_builder.CreateAlloca(
@@ -1076,7 +1053,7 @@ Function* create_prolog_func(int funcID, Module &M, LLVMContext &ctx)
 		BasicBlock *spinlock_idle_bit_bblk = create_spinlock_idle_bit_bblk(
 			ctrl_sig_var, prolog_func, ctx, &is_idle_bit_0_val);
 		BasicBlock *wr_fid_to_hls_bblk = create_wr_fid_to_hls_bblk(ctrl_sig_var,
-			prolog_func, ctx, funcID);
+			prolog_func, ctx);
 		// connect blocks
 		entry_bblk_builder.CreateBr(spinlock_idle_bit_bblk);
 		IRBuilder<> spinlock_idle_bit_bblk_builder(spinlock_idle_bit_bblk,
@@ -1123,7 +1100,8 @@ Function* create_epilog_func(Module &M, LLVMContext &ctx)
 	
 	// In case of profiling multiple files, we want the epilogue function to
 	// only be defined in the main file and be declared in the rest.
-	if(src_filename == "main")
+	if(src_filename.find("main") != std::string::npos)
+	//if(src_filename == "main")
 	{
 		// Create a dummy block with a return to add all other blocks before it
 		BasicBlock *entry_bblk = BasicBlock::Create(ctx, "", epilog_func);
@@ -1137,6 +1115,7 @@ Function* create_epilog_func(Module &M, LLVMContext &ctx)
 		BasicBlock *wr_metrics_to_hls_bblk = create_wr_metrics_to_hls_bblk(
 			ctrl_sig_var, epilog_func, ctx);
 
+		// Connect blocks with control transfer instructions
 		entry_bblk_builder.CreateBr(wr_metrics_to_globals_bblk);
 		IRBuilder<> wr_metrics_to_globals_bblk_builder(
 			wr_metrics_to_globals_bblk, wr_metrics_to_globals_bblk->end());
@@ -1239,7 +1218,7 @@ void create_extern_func_declarations(Module &M, LLVMContext &ctx)
 }
 
 
-int get_event_id(std::string event_name)
+int  get_event_id(std::string event_name)
 {
 	if(event_name == "SW_INCR")					return 0x00;
 	if(event_name == "L1I_CACHE_REFILL")		return 0x01;

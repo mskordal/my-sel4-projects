@@ -8,14 +8,17 @@ Furthermore, there are `cmake` files which are used to integrate the library to
 the SeL4 project built. Below we describe the files
 
 ## Findattester_sw.cmake
-This file is used to connect this library to the main project. The main project's `CMakeLists.txt` uses the macro `find_package` which tries to locate this file
-in the paths specified in the `CMAKE_MODULE_PATH` variable. This is set in the
-`settings.cmake` file in the projects root directory and the path to `projects`
-is already appended to the variable. This is why this directory resides in the
-project directory. If we wanted to move this directory to a different path, we
-would have to append the path to `CMAKE_MODULE_PATH` as well.
+This file is used to connect this library to the main project. The main
+project's `CMakeLists.txt` uses the macro `find_package` which tries to locate
+this file in the paths specified in the `CMAKE_MODULE_PATH` variable. This is
+set in the `settings.cmake` file in the projects root directory and the path to
+`projects` is already appended to the variable. This is why this directory
+resides in the project directory. If we wanted to move this directory to a
+different path, we would have to append the path to `CMAKE_MODULE_PATH` as
+well.
 
-The macro `attester_sw_import_library` defined here is called in the `CMakeLists.txt` file of the project to add the directory path to the project.
+The macro `attester_sw_import_library` defined here is called in the
+`CMakeLists.txt` file of the project to add the directory path to the project.
 
 ## CMakeLists.txt
 Each library imported to an SeL4 project must use a `CMakeLists.txt` file to be

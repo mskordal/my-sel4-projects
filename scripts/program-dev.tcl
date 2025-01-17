@@ -1,6 +1,7 @@
 set bitStream [lindex $argv 0]
 
 open_hw_manager
+#disconnect_hw_server 
 connect_hw_server -allow_non_jtag
 
 open_hw_target

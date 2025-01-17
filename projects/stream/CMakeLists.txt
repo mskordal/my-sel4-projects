@@ -18,7 +18,6 @@ set(KernelArmExportPMUUser ON CACHE BOOL "" FORCE)
 set(LLVMPass "" CACHE FILEPATH "The LLVM pass to instrument the app")
 set(FunctionsFile "" CACHE FILEPATH "The text file with the functions the pass takes")
 set(EventsFile "" CACHE FILEPATH "The text file with the events the pass takes")
-set(ProfMetaFile "" CACHE FILEPATH "The text file the pass takes that contains profiling metadata. Only used at profiling pass")
 set(EventShiftsFile "" CACHE FILEPATH "The text file the pass takes that shows how many bits to shift events for each function. Only used at attestation pass")
 set(KeysFile "" CACHE FILEPATH "The text file with the keys the pass takes. Only used at attestation pass")
 
@@ -45,9 +44,6 @@ sel4_libs_import_libraries()
 accprof_soft_import_library()
 sha256_import_library()
 
-if(ProfMetaFile)
-    set(ProfMetaFlag "SHELL:-mllvm --prof-meta-file=${ProfMetaFile}")
-endif()
 if(EventShiftsFile)
     set(EventShiftsFlag "SHELL:-mllvm --event-shifts-file=${EventShiftsFile}")
 endif()
@@ -75,7 +71,6 @@ target_compile_options( stream PRIVATE
                         -fpass-plugin=${LLVMPass}
                         "SHELL:-mllvm --functions-file=${FunctionsFile}"
                         "SHELL:-mllvm --events-file=${EventsFile}"
-                        "${ProfMetaFlag}"
                         "${EventShiftsFlag}"
                         "${KeysFlag}"
 )

@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <float.h>
+
+#include <sched.h>
+
 #include <sel4/sel4.h>
 #include <sel4platsupport/bootinfo.h>
 #include <utils/util.h>
@@ -10,7 +13,6 @@
 #include <simple-default/simple-default.h>
 
 #include <vka/object.h>
-
 #include <allocman/allocman.h>
 #include <allocman/bootstrap.h>
 #include <allocman/vka.h>
@@ -20,10 +22,12 @@
 #include <sel4utils/vspace.h>
 #include <sel4utils/mapping.h>
 #include <sel4utils/process.h>
+#include <sel4utils/thread.h>
 
 #include <sel4bench/sel4bench.h>
 
 #include <accprof_soft.h>
+#include <sha256.h>
 
 /**
  * STREAM DEFINES START
@@ -73,7 +77,7 @@
  *          per array.
  */
 #ifndef STREAM_ARRAY_SIZE
-#   define STREAM_ARRAY_SIZE	10000 //10000000
+#   define STREAM_ARRAY_SIZE	1000000 //10000000
 #endif
 
 /*  2) STREAM runs each kernel "NTIMES" times and reports the *best* result
@@ -203,7 +207,7 @@ extern int omp_get_num_threads();
 #define BRAM_SIZE_BITS 	16 // 2^15 = 32 KBytes
 #define HLS_VADDR		0x10000000 // this virtual address works
 #define BRAM_VADDR		0x10001000
-#define BRAM_PAGES_NUM BIT(BRAM_SIZE_BITS) / BIT(seL4_PageBits)
+#define BRAM_PAGES_NUM 48 // BIT(BRAM_SIZE_BITS) / BIT(seL4_PageBits)
 #define MAP_A_DEVICE	true
 
 #define APP_PRIORITY seL4_MaxPrio
@@ -287,10 +291,26 @@ int main(void)
 
 	/*bootstrap_configure_virtual_pool(allocman, vaddr,*/
 		/*ALLOCATOR_VIRTUAL_POOL_SIZE, simple_get_pd(&simple));*/
+	// Define scheduling parameters
+	/*sched_params_t params;*/
 
-	vka_object_t bram_objects[BRAM_PAGES_NUM];
-	vka_object_t bram_frame_objects[BRAM_PAGES_NUM];
-	int bram_num_objects[BRAM_PAGES_NUM] = {1,1,1,1,1,1,1,1,1,1,1,1};
+	/*// Set the core affinity for the root thread (assuming core 0)*/
+	/*params.core = 0;  // Bind to core 0*/
+	/*params.priority = 255;  // Example: Set thread priority (optional)*/
+
+	/*// Set the scheduling parameters for the root thread. pass NULL for root TCB*/
+	/*int result = sel4utils_set_sched_affinity(NULL, params);*/
+	/*if (result != 0) {*/
+		/*printf("Error setting root thread affinity: %d\n", result);*/
+	/*}*/
+	/*else*/
+	/*{*/
+		/*printf("Root thread affinity set successfully.\n");*/
+	/*}*/
+
+	/*vka_object_t bram_objects[BRAM_PAGES_NUM];*/
+	/*vka_object_t bram_frame_objects[BRAM_PAGES_NUM];*/
+	/*int bram_num_objects[BRAM_PAGES_NUM] = {1,1,1,1,1,1,1,1,1,1,1,1};*/
 
 
 	unsigned long bram_paddr = BRAM_BASE_ADDR;
@@ -307,7 +327,6 @@ int main(void)
 		error = sel4utils_map_page(	&vka, pd_cap, bram_frame_object[i].cptr,
 			(void*)bram_vaddr, seL4_ReadWrite, 0, NULL, NULL);
 		ZF_LOGF_IFERR(error, "Failed to map bram frame to VSpace.\n");
-
 		bram_paddr += BIT(seL4_PageBits);
 		bram_vaddr += BIT(seL4_PageBits);
 	}
@@ -330,11 +349,28 @@ int main(void)
 	unsigned long hls_vaddr = HLS_VADDR;
 	vka_object_t hls_objects[2];
 
+    // The last mapping function here works as a hack for the pass. The code we
+    // inject that accesses the BRAM needs to make sure all BRAM is mapped. But
+    // because BRAM is mapped in a loop once for every page, there is only one
+    // map call generated in IR. If we try to add code after that map, that
+    // code will also be in a loop. So it will try to access all BRAM only
+    // after the 1st page has been mapped. This will create a segfault when it
+    // tries to access the 2nd page. To avoid that, we map hls address after
+    // BRAM, so this will be a final individual call to map which works as a
+    // sign that all maps have been completed. So the code that writes BRAM is
+    // injected after this map.
 	error = sel4utils_map_page(	&vka, pd_cap, hls_frame_object.cptr,
 		(void*)hls_vaddr, seL4_ReadWrite, 0, hls_objects, NULL);
 	ZF_LOGF_IFERR(error, "Failed to map hls frame to VSpace.\n");
 	printf("Application is using pass!!\n");
 
+	/*int *x = (int*)BRAM_VADDR;*/
+	/*for(int i = 0; i < BRAM_PAGES_NUM; i++ )*/
+	/*{*/
+		/*printf("Will write to page with vaddr %p\n", &x[i*1024]);*/
+		/*x[i*1024] = 1;*/
+	/*}*/
+	/*printf("Wrote all pages");*/
 	// attester_top_func(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
 	// A();
