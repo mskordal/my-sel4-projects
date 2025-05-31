@@ -27,6 +27,10 @@ All files required to build the LLVM Pass, reside in
 - **prof-func-list.md**: Contains presets of functions and IDs to quickly copy
   them to `functions.txt` depending on which application is being profiled.
 
+- **variances-list.txt**: Contains presets of variances to quickly copy them to
+  `variances.txt` depending on what variances you want to apply to the 6 events
+  that are used in attestation executions.
+
 # Build and run
 
 ```bash
@@ -108,15 +112,20 @@ followed by a unique integer id 1-255 separated by space. Check
    profiling function ID and event IDs to the HLS. If `USE_HLS` is set, the pass
    spins on the idle bit of the hardware to make sure multiple writes will not
    overlap and corrupt the data.
-4. It defines a function called `accprof_epilog`. This function takes the current
-   7 values of the local variables defined in the prologue. It reads the 6
-   counters and the cycle counter and adds each result with the corresponding
-   local variable and then assigns the sum to the corresponding global variable.
-   It then writes the global values to the HLS hardware.
+4. It defines a function called `accprof_epilog`. This function first calls
+   Data/Instruction Synchronisation Barriers (DSB, ISB) to make sure all
+   instruction are completed even at microarchitectural level before reading
+   counter values. Then it takes the current 7 values of the local variables
+   defined in the prologue. It reads the 6 counters and the cycle counter and
+   adds each result with the corresponding local variable and then assigns the
+   sum to the corresponding global variable.  It then writes the global values
+   to the HLS hardware.
 The next steps apply for every function listed in `functions.txt`:
 1. In the function prologue the pass defines 7 local variables that to store
    counted events and then calls `accprof_prolog`.
-2. After `accprog_epilog` counters are started to begin counting.
+2. After `accprog_prolog` it calls DSB and ISB to make sure all instruction are
+   completed even at microarchitectural level before starting the counters.
+   Then the counters are started to begin counting.
 3. In the body of each function, the pass searches for calls to those same
    functions. Before each call instruction, the pass stores the current event
    values since when the callee will be called, the counters will be reset. Then

@@ -1,0 +1,12 @@
+# Events
+L1D_CACHE_REFILL
+L2D_CACHE_REFILL
+
+# Variances
+0 0
+1 0
+0 1
+1 1
+2 0
+0 2
+2 2

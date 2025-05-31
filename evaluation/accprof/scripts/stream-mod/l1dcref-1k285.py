@@ -1,36 +1,19 @@
+import numpy as np
 import matplotlib.pyplot as plt
 
-# fig, ax = plt.subplots()
-# Adjust figure size
-fig, ax = plt.subplots(figsize=(6, 4), dpi=300)  # Adjust the width (8 inches) as needed
+x_coords = ['APF', 'APF-Soft']
+y_vals = [2267, 11076]
+x = np.arange(len(x_coords))
+# Create thx = [0, 0.7]e bar chart
+plt.figure(figsize=(11, 8))
+# plt.bar(x, width=0.4, height=y_vals, color='black')
+plt.bar(x[0], height=y_vals[0], width=0.4, color='black', label="APF")  # Solid black
+plt.bar(x[1], height=y_vals[1], width=0.4, color=(0, 0, 0, 0.4), label="APF-Soft")
+plt.ylabel('Level 1 Data Cache Refills', fontsize=28)
+plt.title('STREAM modified 100K array - 285 runs', fontsize=32)
+plt.xticks(ticks=x, labels=x_coords, fontsize=32)
+plt.yticks(fontsize=28)
+plt.grid(axis='y', linestyle='--', alpha=1)
 
-configs = ['Hardware', 'Software']
-counts = [2267, 11076]
-bar_colors = ['#ffd400', '#b7b7b7']
-
-# Adjust the width of the bars
-bar_width = 0.7  # You can adjust this value as needed
-ax.bar(configs, counts, color=bar_colors, width=bar_width)
-
-
-ax.set_ylabel('Level 1 Data Cache Refills', color='white')
-ax.set_title('STREAM modified 100K array - 285 runs', color='white')
-
-ax.spines['left'].set_color('white')
-ax.spines['bottom'].set_color('white')
-ax.spines['right'].set_visible(False)
-ax.spines['top'].set_visible(False)
-
-# Loop through x tick labels and set color
-for label in ax.get_xticklabels():
-    label.set_color('white')
-
-# Set y-axis tick parameters with white label color
-ax.tick_params(axis='y', which='both', labelcolor='white')
-
-# Adjust the x-axis limits to make it shorter
-# ax.set_xlim(-0.25, len(configs) - 0.75)
-
-# Save the png with same name as script with different extension
 figname = __file__[:-2]
-plt.savefig(figname + 'png', transparent=True)
+plt.savefig(figname + 'svg')

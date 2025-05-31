@@ -19,11 +19,9 @@ set(LLVMPass "" CACHE FILEPATH "The LLVM pass to instrument the app")
 set(FunctionsFile "" CACHE FILEPATH "The text file with the functions the pass takes")
 set(EventsFile "" CACHE FILEPATH "The text file with the events the pass takes")
 set(EventShiftsFile "" CACHE FILEPATH "The text file the pass takes that shows how many bits to shift events for each function. Only used at attestation pass")
-set(KeysFile "" CACHE FILEPATH "The text file with the keys the pass takes. Only used at attestation pass")
 
 set(ProfMetaFlag "")
 set(EventShiftsFlag "")
-set(KeysFlag "")
 
 find_package(seL4 REQUIRED)
 find_package(elfloader-tool REQUIRED)
@@ -47,22 +45,19 @@ sha256_import_library()
 if(EventShiftsFile)
     set(EventShiftsFlag "SHELL:-mllvm --event-shifts-file=${EventShiftsFile}")
 endif()
-if(KeysFile)
-    set(KeysFlag "SHELL:-mllvm --keys-file=${KeysFile}")
-endif()
-# add_executable(app src/app.c)
+#add_executable(app src/app.c)
 
-# # Include the pass in the app elf file
-# #target_compile_options(app PRIVATE -fpass-plugin=/home/mskordal/workspace/myRepos/my-sel4-projects/llvmpassbuild/libInjectBRAM.so)
+# Include the pass in the app elf file
+#target_compile_options(app PRIVATE -fpass-plugin=/home/mskordal/workspace/myRepos/my-sel4-projects/llvmpassbuild/libInjectBRAM.so)
 
-# target_link_libraries(app
-# 	sel4 muslc sel4muslcsys
-# 	sel4utils)
+#target_link_libraries(app
+	#sel4 muslc sel4muslcsys
+	#sel4utils)
 
-# include(cpio)
-# MakeCPIO(archive.o "$<TARGET_FILE:app>")
+#include(cpio)
+#MakeCPIO(archive.o "$<TARGET_FILE:app>")
 
-# add_executable(stream archive.o src/main.c)
+#add_executable(stream archive.o src/main.c)
 add_executable(stream src/main.c)
 
 target_compile_options( stream PRIVATE 
@@ -72,7 +67,6 @@ target_compile_options( stream PRIVATE
                         "SHELL:-mllvm --functions-file=${FunctionsFile}"
                         "SHELL:-mllvm --events-file=${EventsFile}"
                         "${EventShiftsFlag}"
-                        "${KeysFlag}"
 )
 
 target_link_libraries(stream 
@@ -85,6 +79,7 @@ target_link_libraries(stream
     sel4debug
     sel4allocman
     sel4bench
+	sel4sync
     accprof_soft
     sha256
 )

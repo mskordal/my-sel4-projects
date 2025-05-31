@@ -50,4 +50,9 @@ do
 	reset_board
 	sleep 1
 done
+
+# Second argument is variance. We don't care for that here as we simply want to
+# output the metrics per of every function in its file
+${script_path}/process-profile-data.sh ${outdir_path} 0
+
 rm -rf ${root_path}/vivado*

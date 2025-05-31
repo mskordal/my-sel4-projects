@@ -19,6 +19,7 @@
 # ../griddle --PLATFORM=sabre --SIMULATION
 # ninja
 #
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffreestanding -mno-outline-atomics")
 set(SIMULATION OFF CACHE BOOL "Include only simulation compatible tests")
 set(RELEASE OFF CACHE BOOL "Performance optimized build")
 set(VERIFICATION OFF CACHE BOOL "Only verification friendly kernel features")

@@ -40,10 +40,10 @@ do
 		echo "${results_prof_path} does not exist."
 		exit 1
 	fi
-	if (( $(ls ${results_prof_path} | wc -l) > 1 )); then
+	if (( $(ls ${results_prof_path} | wc -l) > 0 )); then
 		${script_path}/process-profile-data.sh ${results_prof_path} ${exec}
 	else
-		echo "Need more than 1 profile result files to generate keys"
+		echo "Need a profile result file to generate keys"
 		exit 1
 	fi
 
@@ -51,7 +51,7 @@ do
 	cd ${sel4build_path}
 	${script_path}/sel4-compile.sh ${att_pass_build_path}/libattprof.so \
 		${prof_pass_path}/functions.txt ${prof_pass_path}/events.txt \
-		${results_prof_path}/event-shifts.txt ${results_prof_path}/keys.txt $3
+		${results_prof_path}/event-shifts.txt $3
 	cd ${root_path}
 	# repeat execution for the same variance
 	for (( rep = 0 ; rep < var_reps ; rep++ ))
@@ -60,9 +60,14 @@ do
 		vivado -mode 'batch' -source ${script_path}/program-dev.tcl \
 			-tclargs ${bitstream_path}
 		# Run attestation
-		xsct ${script_path}/init-board.tcl ${elfs_path}/pmufw.elf \
+		xsct ${script_path}/init-board-test.tcl ${elfs_path}/pmufw.elf \
 			${elfs_path}/zynqmp_fsbl.elf ${elfs_path}/bl31.elf \
-			${elfs_path}/u-boot.elf
+			${elfs_path}/u-boot.elf ${results_prof_path}/keys.txt 
+		if [[ $? -ne 0 ]]; then # this tcl may error. If so, repeat iteration
+			((rep--))
+			reset_board
+			continue
+		fi
 		# Wait execution to finish
 		xsct ${script_path}/spinlock-bram.tcl
 		# Read resuls from BRAM

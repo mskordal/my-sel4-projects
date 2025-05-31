@@ -1,47 +1,31 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <sel4utils/process.h>
 
 
 /* constants */
 #define MSG_DATA 0x6161 //  arbitrary data to send
 
-void func1(void);
-void func2(void);
-void func3(void);
+static inline void clflush(void *addr);
 
-int main(int argc, char **argv)
-{
-	int x = 0;
+int main(int argc, char **argv) {
 
-	// printf("process_2: hey hey hey\n");
+	seL4_CPtr ep = atol(argv[0]);
 
-	// func1();
-	x = x + 1;
+	// notify main thread that secondary is ready, then wait
+	printf("secondary process sends and waits\n");
+	seL4_Send(ep, seL4_MessageInfo_new(0, 0, 0, 0));
+	seL4_Wait(ep, NULL);
 
-	// func2();
-	x = x + 2;
-
-	// func3();
-	x = x + 3;
-
-	// printf("x: %d\n", x);
-	/*while(1);*/
-
+	seL4_Send(ep, seL4_MessageInfo_new(0, 0, 0, 0));
 	return 0;
 }
 
-void func1(void)
-{
-	printf("This is func1\n");
-}
 
-void func2(void)
-{
-	printf("This is func2\n");
+/******************************/
+/* Flush and Reload functions */
+/******************************/
+static inline void clflush(void *addr) {
+	asm volatile ("DC CIVAC, %[ad]" : : [ad] "r" (addr));
+	asm volatile("DSB SY");
 }
-
-void func3(void)
-{
-	printf("This is func3\n");
-}
-

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <float.h>
+#include <platsupport/arch/generic_timer.h>
 
 #include <sched.h>
 
@@ -26,8 +27,24 @@
 
 #include <sel4bench/sel4bench.h>
 
+#include <interfaces/sel4_client.h>
+
 #include <accprof_soft.h>
 #include <sha256.h>
+
+/**
+ * Attack configurations start
+ */
+#define PRIME_N_PROBE
+/*#define FLUSH_N_RELOAD*/
+/*#define EVICT_N_TIME*/
+/*#define FLUSH_N_FLUSH*/
+/*#define INVAL_N_TRANS*/
+
+#define COPY_ATK
+/*#define SCALE_ATK*/
+/*#define ADD_ATK*/
+/*#define TRIAD_ATK*/
 
 /**
  * STREAM DEFINES START
@@ -77,7 +94,8 @@
  *          per array.
  */
 #ifndef STREAM_ARRAY_SIZE
-#   define STREAM_ARRAY_SIZE	1000000 //10000000
+/*#   define STREAM_ARRAY_SIZE	1000 //10000000*/
+ #   define STREAM_ARRAY_SIZE	1000000 //10000000
 #endif
 
 /*  2) STREAM runs each kernel "NTIMES" times and reports the *best* result
@@ -198,30 +216,13 @@ extern int omp_get_num_threads();
  */
 
 
-#define HLS_BASE_ADDR				0xa0000000
-#define BRAM_BASE_ADDR				0xa0040000
-#define HLS_FUNCTION_COUNTER_OFFSET	0x10
-#define HLS_BRAM_ADDR_OFFSET		0x18
-
+#define HLS_BASE_ADDR	0xa0000000
 #define HLS_SIZE_BITS 	12 // 2^12 = 4 KBytes
-#define BRAM_SIZE_BITS 	16 // 2^15 = 32 KBytes
 #define HLS_VADDR		0x10000000 // this virtual address works
-#define BRAM_VADDR		0x10001000
-#define BRAM_PAGES_NUM 48 // BIT(BRAM_SIZE_BITS) / BIT(seL4_PageBits)
 #define MAP_A_DEVICE	true
 
 #define APP_PRIORITY seL4_MaxPrio
 #define APP_IMAGE_NAME "app"
-
-#define ARRAY_SIZE_BITS 	19 // 2^19 = 256*256*8 Bytes = 512 KBytes
-#define ARRAY_VADDR 0x6000000
-#define MINd 0.0 // Min value in matrix
-#define MAXd 1.0 // Max value in matrix
-#define UNROLL 64 // Number of times to unroll loop in unrolled_matrix_multiply()
-#define OMP_THREADS 12 // Number of threads to use with omp pragma
-#define BLOCK_SIZE 32 // Block size when using blocked_matrix_multiply()
-#define MEM_ALIGN 32 // Memory alignment required for _mm256 instructions
-#define DIMENSION_SIZE 128
 
 
 /* global environment variables */
@@ -241,32 +242,54 @@ UNUSED static char allocator_mem_pool[ALLOCATOR_STATIC_POOL_SIZE];
 /* static memory for virtual memory bootstrapping */
 UNUSED static sel4utils_alloc_data_t data;
 
-/* stack for the new thread */
-#define THREAD_2_STACK_SIZE 4096
-UNUSED static int thread_2_stack[THREAD_2_STACK_SIZE];
+
+#if defined(PRIME_N_PROBE) || defined(FLUSH_N_RELOAD) || defined(EVICT_N_TIME) \
+	|| defined(FLUSH_N_FLUSH) || defined(INVAL_N_TRANS)
+#define CACHE_LINE_BYTES 64
+#define DOUBLES_IN_LINE CACHE_LINE_BYTES/sizeof(double)
+generic_timer_t timer;
+#endif
+
+#if defined(PRIME_N_PROBE) || defined(EVICT_N_TIME)
+volatile STREAM_TYPE attacker_array[STREAM_ARRAY_SIZE];
+void prime();
+#endif
+#ifdef PRIME_N_PROBE
+void probe();
+#endif
+#if defined(FLUSH_N_RELOAD) || defined(FLUSH_N_FLUSH)
+void flush();
+#endif
+#if defined (FLUSH_N_RELOAD) || defined(INVAL_N_TRANS)
+void reload();
+#endif
+#ifdef FLUSH_N_FLUSH
+void time_flush();
+#endif
+#ifdef INVAL_N_TRANS
+void invalidate();
+#endif
 
 void stream_func(void);
 
-int main(void)
-{
+int main(void) {
 	seL4_Error error = 0;
 
 	info = platsupport_get_bootinfo();
 	ZF_LOGF_IF(!info, "Failed to get bootinfo.");
 
-	/* Set up logging and give us a name: useful for debugging if the thread faults */
+	/* Set up logging and give name: useful for debug if the thread faults */
 	zf_log_set_tag_prefix("mainProcess:");
 	NAME_THREAD(seL4_CapInitThreadTCB, "mainProcess");
 
 	/* init simple */
 	simple_default_init_bootinfo(&simple, info);
-
 	/* print out bootinfo and other info about simple */
 	/*simple_print(&simple);*/
 
 	/* create an allocator */
 	allocman = bootstrap_use_current_simple(&simple, ALLOCATOR_STATIC_POOL_SIZE,
-		allocator_mem_pool);
+										 allocator_mem_pool);
 	ZF_LOGF_IF(allocman == NULL, "Failed to initialize allocator.\n");
 
 	/* create a vka (interface for interacting with the underlying allocator) */
@@ -277,59 +300,17 @@ int main(void)
 	pd_cap = simple_get_pd(&simple);
 
 	/* create a vspace object to manage the main thread's vspace */
-	error = sel4utils_bootstrap_vspace_with_bootinfo_leaky(&vspace,
-		&data, pd_cap, &vka, info);
+	error = sel4utils_bootstrap_vspace_with_bootinfo_leaky(
+		&vspace, &data, pd_cap, &vka, info
+	);
 	ZF_LOGF_IFERR(error, "Failed to prepare root thread's VSpace for use.\n");
 
-	/* fill the allocator with virtual memory */
-	/*void *vaddr;*/
-	/*UNUSED reservation_t virtual_reservation;*/
-	/*virtual_reservation = vspace_reserve_range(&vspace,*/
-		/*ALLOCATOR_VIRTUAL_POOL_SIZE, seL4_AllRights, 1, &vaddr);*/
-	/*ZF_LOGF_IF(virtual_reservation.res == NULL,*/
-		/*"Failed to reserve a chunk of memory.\n");*/
 
-	/*bootstrap_configure_virtual_pool(allocman, vaddr,*/
-		/*ALLOCATOR_VIRTUAL_POOL_SIZE, simple_get_pd(&simple));*/
-	// Define scheduling parameters
-	/*sched_params_t params;*/
-
-	/*// Set the core affinity for the root thread (assuming core 0)*/
-	/*params.core = 0;  // Bind to core 0*/
-	/*params.priority = 255;  // Example: Set thread priority (optional)*/
-
-	/*// Set the scheduling parameters for the root thread. pass NULL for root TCB*/
-	/*int result = sel4utils_set_sched_affinity(NULL, params);*/
-	/*if (result != 0) {*/
-		/*printf("Error setting root thread affinity: %d\n", result);*/
-	/*}*/
-	/*else*/
-	/*{*/
-		/*printf("Root thread affinity set successfully.\n");*/
-	/*}*/
-
-	/*vka_object_t bram_objects[BRAM_PAGES_NUM];*/
-	/*vka_object_t bram_frame_objects[BRAM_PAGES_NUM];*/
-	/*int bram_num_objects[BRAM_PAGES_NUM] = {1,1,1,1,1,1,1,1,1,1,1,1};*/
-
-
-	unsigned long bram_paddr = BRAM_BASE_ADDR;
-	unsigned long bram_vaddr = BRAM_VADDR;
-	vka_object_t bram_frame_object[BRAM_PAGES_NUM];
-
-	for(int i = 0; i < BRAM_PAGES_NUM; i++ )
-	{
-		error = vka_alloc_object_at_maybe_dev(&vka, seL4_ARM_SmallPageObject,
-			seL4_PageBits, bram_paddr, MAP_A_DEVICE, &bram_frame_object[i]);
-		ZF_LOGF_IFERR(error, "Failed to alloc a frame in BRAM.\n");
-
-		vka_object_t bram_object;
-		error = sel4utils_map_page(	&vka, pd_cap, bram_frame_object[i].cptr,
-			(void*)bram_vaddr, seL4_ReadWrite, 0, NULL, NULL);
-		ZF_LOGF_IFERR(error, "Failed to map bram frame to VSpace.\n");
-		bram_paddr += BIT(seL4_PageBits);
-		bram_vaddr += BIT(seL4_PageBits);
-	}
+#if defined(PRIME_N_PROBE) || defined(FLUSH_N_RELOAD) || defined(EVICT_N_TIME) \
+	|| defined(FLUSH_N_FLUSH) || defined(INVAL_N_TRANS)
+	error = generic_timer_init(&timer);
+	ZF_LOGF_IFERR(error, "Failed to initialize the generic timer!\n");
+#endif
 
 	vka_object_t hls_frame_object;
 
@@ -338,8 +319,10 @@ int main(void)
 	 * called 2 levels internally since here we can specify the physical
 	 * address we want to map and that we want to use a device
 	 */
-	vka_alloc_object_at_maybe_dev(	&vka, seL4_ARM_SmallPageObject,
-		HLS_SIZE_BITS, HLS_BASE_ADDR, MAP_A_DEVICE, &hls_frame_object);
+	vka_alloc_object_at_maybe_dev(
+		&vka, seL4_ARM_SmallPageObject, HLS_SIZE_BITS, HLS_BASE_ADDR,
+		MAP_A_DEVICE, &hls_frame_object
+	);
 	ZF_LOGF_IFERR(error, "Failed to alloc a frame in HLS.\n");
 
 	// This array needs to be passed to sel4utils_map_page cause this function
@@ -349,184 +332,167 @@ int main(void)
 	unsigned long hls_vaddr = HLS_VADDR;
 	vka_object_t hls_objects[2];
 
-    // The last mapping function here works as a hack for the pass. The code we
-    // inject that accesses the BRAM needs to make sure all BRAM is mapped. But
-    // because BRAM is mapped in a loop once for every page, there is only one
-    // map call generated in IR. If we try to add code after that map, that
-    // code will also be in a loop. So it will try to access all BRAM only
-    // after the 1st page has been mapped. This will create a segfault when it
-    // tries to access the 2nd page. To avoid that, we map hls address after
-    // BRAM, so this will be a final individual call to map which works as a
-    // sign that all maps have been completed. So the code that writes BRAM is
-    // injected after this map.
-	error = sel4utils_map_page(	&vka, pd_cap, hls_frame_object.cptr,
-		(void*)hls_vaddr, seL4_ReadWrite, 0, hls_objects, NULL);
+	error = sel4utils_map_page(
+		&vka, pd_cap, hls_frame_object.cptr, (void*)hls_vaddr, seL4_ReadWrite,
+		0, hls_objects, NULL
+	);
 	ZF_LOGF_IFERR(error, "Failed to map hls frame to VSpace.\n");
 	printf("Application is using pass!!\n");
 
-	/*int *x = (int*)BRAM_VADDR;*/
-	/*for(int i = 0; i < BRAM_PAGES_NUM; i++ )*/
-	/*{*/
-		/*printf("Will write to page with vaddr %p\n", &x[i*1024]);*/
-		/*x[i*1024] = 1;*/
-	/*}*/
-	/*printf("Wrote all pages");*/
-	// attester_top_func(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-
-	// A();
 	printf("before stream!!\n");
 	stream_func();
+	/*printf("time ns: %lu\n", elapsed_nsecs);*/
 	printf("after stream!!\n");
 
 	return 0;
 }
 
-void stream_func(void)
-{
-    int			quantum, checktick();
-    int			BytesPerWord;
-    int			k;
-    ssize_t		j;
-    STREAM_TYPE		scalar;
-    double		t, times[4][NTIMES];
 
-    /* --- SETUP --- determine precision and check timing --- */
+void stream_func(void) {
+	int			quantum, checktick();
+	int			BytesPerWord;
+	int			k;
+	ssize_t		j;
+	STREAM_TYPE		scalar;
+	double		t, times[4][NTIMES];
 
-    printf(HLINE);
-    printf("STREAM version $Revision: 5.10 $\n");
-    printf(HLINE);
-    BytesPerWord = sizeof(STREAM_TYPE);
-    printf("This system uses %d bytes per array element.\n",
-	BytesPerWord);
+	/* --- SETUP --- determine precision and check timing --- */
 
-    printf(HLINE);
+	printf(HLINE);
+	printf("STREAM version $Revision: 5.10 $\n");
+	printf(HLINE);
+	BytesPerWord = sizeof(STREAM_TYPE);
+	printf("This system uses %d bytes per array element.\n",
+		BytesPerWord);
+
+	printf(HLINE);
 #ifdef N
-    printf("*****  WARNING: ******\n");
-    printf("      It appears that you set the preprocessor variable N when compiling this code.\n");
-    printf("      This version of the code uses the preprocessor variable STREAM_ARRAY_SIZE to control the array size\n");
-    printf("      Reverting to default value of STREAM_ARRAY_SIZE=%llu\n",(unsigned long long) STREAM_ARRAY_SIZE);
-    printf("*****  WARNING: ******\n");
+	printf("*****  WARNING: ******\n");
+	printf("      It appears that you set the preprocessor variable N when compiling this code.\n");
+	printf("      This version of the code uses the preprocessor variable STREAM_ARRAY_SIZE to control the array size\n");
+	printf("      Reverting to default value of STREAM_ARRAY_SIZE=%llu\n",(unsigned long long) STREAM_ARRAY_SIZE);
+	printf("*****  WARNING: ******\n");
 #endif
 
-    printf("Array size = %llu (elements), Offset = %d (elements)\n" , (unsigned long long) STREAM_ARRAY_SIZE, OFFSET);
-    printf("Memory per array = %.1f MiB (= %.1f GiB).\n", 
-	BytesPerWord * ( (double) STREAM_ARRAY_SIZE / 1024.0/1024.0),
-	BytesPerWord * ( (double) STREAM_ARRAY_SIZE / 1024.0/1024.0/1024.0));
-    printf("Total memory required = %.1f MiB (= %.1f GiB).\n",
-	(3.0 * BytesPerWord) * ( (double) STREAM_ARRAY_SIZE / 1024.0/1024.),
-	(3.0 * BytesPerWord) * ( (double) STREAM_ARRAY_SIZE / 1024.0/1024./1024.));
-    printf("Each kernel will be executed %d times.\n", NTIMES);
-    printf(" The *best* time for each kernel (excluding the first iteration)\n"); 
-    printf(" will be used to compute the reported bandwidth.\n");
+	printf("Array size = %llu (elements), Offset = %d (elements)\n" , (unsigned long long) STREAM_ARRAY_SIZE, OFFSET);
+	printf("Memory per array = %.1f MiB (= %.1f GiB).\n", 
+		BytesPerWord * ( (double) STREAM_ARRAY_SIZE / 1024.0/1024.0),
+		BytesPerWord * ( (double) STREAM_ARRAY_SIZE / 1024.0/1024.0/1024.0));
+	printf("Total memory required = %.1f MiB (= %.1f GiB).\n",
+		(3.0 * BytesPerWord) * ( (double) STREAM_ARRAY_SIZE / 1024.0/1024.),
+		(3.0 * BytesPerWord) * ( (double) STREAM_ARRAY_SIZE / 1024.0/1024./1024.));
+	printf("Each kernel will be executed %d times.\n", NTIMES);
+	printf(" The *best* time for each kernel (excluding the first iteration)\n"); 
+	printf(" will be used to compute the reported bandwidth.\n");
 
 #ifdef _OPENMP
-    printf(HLINE);
-#pragma omp parallel 
-    {
-#pragma omp master
+	printf(HLINE);
+	/*#pragma omp parallel */
 	{
-	    k = omp_get_num_threads();
-	    printf ("Number of Threads requested = %i\n",k);
-        }
-    }
+		/*#pragma omp master*/
+		{
+			k = omp_get_num_threads();
+			printf ("Number of Threads requested = %i\n",k);
+		}
+	}
 #endif
 
 #ifdef _OPENMP
 	k = 0;
-#pragma omp parallel
-#pragma omp atomic 
-		k++;
-    printf ("Number of Threads counted = %i\n",k);
+	/*#pragma omp parallel*/
+	/*#pragma omp atomic */
+	k++;
+	printf ("Number of Threads counted = %i\n",k);
 #endif
 
-    /* Get initial value for system clock. */
-#pragma omp parallel for
-    for (j=0; j<STREAM_ARRAY_SIZE; j++) {
-	    a[j] = 1.0;
-	    b[j] = 2.0;
-	    c[j] = 0.0;
+	/* Get initial value for system clock. */
+	/*#pragma omp parallel for*/
+	for (j=0; j<STREAM_ARRAY_SIZE; j++) {
+		a[j] = 1.0;
+		b[j] = 2.0;
+		c[j] = 0.0;
 	}
 
-    printf(HLINE);
+	printf(HLINE);
 
-    // if  ( (quantum = checktick()) >= 1) 
-    if  ( (quantum = 1) >= 1) 
-	printf("Your clock granularity/precision appears to be "
-	    "%d microseconds.\n", quantum);
-    else {
-	printf("Your clock granularity appears to be "
-	    "less than one microsecond.\n");
-	quantum = 1;
-    }
+	// if  ( (quantum = checktick()) >= 1) 
+	if  ( (quantum = 1) >= 1) 
+		printf("Your clock granularity/precision appears to be "
+		 "%d microseconds.\n", quantum);
+	else {
+		printf("Your clock granularity appears to be "
+		 "less than one microsecond.\n");
+		quantum = 1;
+	}
 
-    t = mysecond();
-#pragma omp parallel for
-    for (j = 0; j < STREAM_ARRAY_SIZE; j++)
+	t = mysecond();
+	/*#pragma omp parallel for*/
+	for (j = 0; j < STREAM_ARRAY_SIZE; j++)
 		a[j] = 2.0E0 * a[j];
-    t = 1.0E6 * (mysecond() - t);
+	t = 1.0E6 * (mysecond() - t);
 
-    printf("Each test below will take on the order"
-	" of %d microseconds.\n", (int) t  );
-    printf("   (= %d clock ticks)\n", (int) (t/quantum) );
-    printf("Increase the size of the arrays if this shows that\n");
-    printf("you are not getting at least 20 clock ticks per test.\n");
+	printf("Each test below will take on the order"
+		" of %d microseconds.\n", (int) t  );
+	printf("   (= %d clock ticks)\n", (int) (t/quantum) );
+	printf("Increase the size of the arrays if this shows that\n");
+	printf("you are not getting at least 20 clock ticks per test.\n");
 
-    printf(HLINE);
+	printf(HLINE);
 
-    printf("WARNING -- The above is only a rough guideline.\n");
-    printf("For best results, please be sure you know the\n");
-    printf("precision of your system timer.\n");
-    printf(HLINE);
-    
-    /*	--- MAIN LOOP --- repeat test cases NTIMES times --- */
+	printf("WARNING -- The above is only a rough guideline.\n");
+	printf("For best results, please be sure you know the\n");
+	printf("precision of your system timer.\n");
+	printf(HLINE);
 
-    scalar = 3.0;
-    for (k=0; k<NTIMES; k++)
+	/*	--- MAIN LOOP --- repeat test cases NTIMES times --- */
+
+	scalar = 3.0;
+	for (k=0; k<NTIMES; k++)
 	{
-	times[0][k] = mysecond();
+		times[0][k] = mysecond();
 #ifdef TUNED
-        tuned_STREAM_Copy();
+		tuned_STREAM_Copy();
 #else
-#pragma omp parallel for
-	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    c[j] = a[j];
+		/*#pragma omp parallel for*/
+		for (j=0; j<STREAM_ARRAY_SIZE; j++)
+			c[j] = a[j];
 #endif
-	times[0][k] = mysecond() - times[0][k];
-	
-	times[1][k] = mysecond();
+		times[0][k] = mysecond() - times[0][k];
+
+		times[1][k] = mysecond();
 #ifdef TUNED
-        tuned_STREAM_Scale(scalar);
+		tuned_STREAM_Scale(scalar);
 #else
-#pragma omp parallel for
-	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    b[j] = scalar*c[j];
+		/*#pragma omp parallel for*/
+		for (j=0; j<STREAM_ARRAY_SIZE; j++)
+			b[j] = scalar*c[j];
 #endif
-	times[1][k] = mysecond() - times[1][k];
-	
-	times[2][k] = mysecond();
+		times[1][k] = mysecond() - times[1][k];
+
+		times[2][k] = mysecond();
 #ifdef TUNED
-        tuned_STREAM_Add();
+		tuned_STREAM_Add();
 #else
-#pragma omp parallel for
-	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    c[j] = a[j]+b[j];
+		/*#pragma omp parallel for*/
+		for (j=0; j<STREAM_ARRAY_SIZE; j++)
+			c[j] = a[j]+b[j];
 #endif
-	times[2][k] = mysecond() - times[2][k];
-	
-	times[3][k] = mysecond();
+		times[2][k] = mysecond() - times[2][k];
+
+		times[3][k] = mysecond();
 #ifdef TUNED
-        tuned_STREAM_Triad(scalar);
+		tuned_STREAM_Triad(scalar);
 #else
-#pragma omp parallel for
-	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    a[j] = b[j]+scalar*c[j];
+		/*#pragma omp parallel for*/
+		for (j=0; j<STREAM_ARRAY_SIZE; j++)
+			a[j] = b[j]+scalar*c[j];
 #endif
-	times[3][k] = mysecond() - times[3][k];
+		times[3][k] = mysecond() - times[3][k];
 	}
 
-    /*	--- SUMMARY --- */
+	/*	--- SUMMARY --- */
 
-    for (k=1; k<NTIMES; k++) /* note -- skip first iteration */
+	for (k=1; k<NTIMES; k++) /* note -- skip first iteration */
 	{
 		for (j=0; j<4; j++)
 		{
@@ -534,23 +500,23 @@ void stream_func(void)
 			mintime[j] = MIN(mintime[j], times[j][k]);
 			maxtime[j] = MAX(maxtime[j], times[j][k]);
 		}
-		}
-    
-    printf("Function    Best Rate MB/s  Avg time     Min time     Max time\n");
-    for (j=0; j<4; j++) {
+	}
+
+	printf("Function    Best Rate MB/s  Avg time     Min time     Max time\n");
+	for (j=0; j<4; j++) {
 		avgtime[j] = avgtime[j]/(double)(NTIMES-1);
 
 		printf("%s%12.1f  %11.6f  %11.6f  %11.6f\n", label[j],
-			1.0E-06 * bytes[j]/mintime[j],
-			avgtime[j],
-			mintime[j],
-			maxtime[j]);
-    }
-    printf(HLINE);
+		 1.0E-06 * bytes[j]/mintime[j],
+		 avgtime[j],
+		 mintime[j],
+		 maxtime[j]);
+	}
+	printf(HLINE);
 
-    /* --- Check Results --- */
-    checkSTREAMresults();
-    printf(HLINE);
+	/* --- Check Results --- */
+	checkSTREAMresults();
+	printf(HLINE);
 }
 
 
@@ -560,27 +526,27 @@ void stream_func(void)
 
 int checktick()
 {
-    int		i, minDelta, Delta;
-    double	t1, t2, timesfound[M];
+	int		i, minDelta, Delta;
+	double	t1, t2, timesfound[M];
 
-/*  Collect a sequence of M unique time values from the system. */
+	/*  Collect a sequence of M unique time values from the system. */
 
-    for (i = 0; i < M; i++) {
-	t1 = mysecond();
-	while( ((t2=mysecond()) - t1) < 1.0E-6 );
-	timesfound[i] = t1 = t2;
+	for (i = 0; i < M; i++) {
+		t1 = mysecond();
+		while( ((t2=mysecond()) - t1) < 1.0E-6 );
+		timesfound[i] = t1 = t2;
 	}
 
-/*
+	/*
  * Determine the minimum difference between these M values.
  * This result will be our estimate (in microseconds) for the
  * clock granularity.
  */
 
-    minDelta = 1000000;
-    for (i = 1; i < M; i++) {
-	Delta = (int)( 1.0E6 * (timesfound[i]-timesfound[i-1]));
-	minDelta = MIN(minDelta, MAX(Delta,0));
+	minDelta = 1000000;
+	for (i = 1; i < M; i++) {
+		Delta = (int)( 1.0E6 * (timesfound[i]-timesfound[i-1]));
+		minDelta = MIN(minDelta, MAX(Delta,0));
 	}
 
 	return(minDelta);
@@ -595,13 +561,13 @@ int checktick()
 
 double mysecond()
 {
-        struct timeval tp;
-        struct timezone tzp;
-        int i;
-		mysecglob++;
-        // i = gettimeofday(&tp,&tzp);
-        // return ( (double) tp.tv_sec + (double) tp.tv_usec * 1.e-6 );
-		return mysecglob;
+	struct timeval tp;
+	struct timezone tzp;
+	int i;
+	mysecglob++;
+	// i = gettimeofday(&tp,&tzp);
+	// return ( (double) tp.tv_sec + (double) tp.tv_usec * 1.e-6 );
+	return mysecglob;
 }
 
 #ifndef abs
@@ -616,23 +582,23 @@ void checkSTREAMresults ()
 	ssize_t	j;
 	int	k,ierr,err;
 
-    /* reproduce initialization */
+	/* reproduce initialization */
 	aj = 1.0;
 	bj = 2.0;
 	cj = 0.0;
-    /* a[] is modified during timing check */
+	/* a[] is modified during timing check */
 	aj = 2.0E0 * aj;
-    /* now execute timing loop */
+	/* now execute timing loop */
 	scalar = 3.0;
 	for (k=0; k<NTIMES; k++)
-        {
-            cj = aj;
-            bj = scalar*cj;
-            cj = aj+bj;
-            aj = bj+scalar*cj;
-        }
+	{
+		cj = aj;
+		bj = scalar*cj;
+		cj = aj+bj;
+		aj = bj+scalar*cj;
+	}
 
-    /* accumulate deltas between observed and expected results */
+	/* accumulate deltas between observed and expected results */
 	aSumErr = 0.0;
 	bSumErr = 0.0;
 	cSumErr = 0.0;
@@ -669,7 +635,7 @@ void checkSTREAMresults ()
 #ifdef VERBOSE
 				if (ierr < 10) {
 					printf("         array a: index: %ld, expected: %e, observed: %e, relative error: %e\n",
-						j,aj,a[j],abs((aj-a[j])/aAvgErr));
+			j,aj,a[j],abs((aj-a[j])/aAvgErr));
 				}
 #endif
 			}
@@ -688,7 +654,7 @@ void checkSTREAMresults ()
 #ifdef VERBOSE
 				if (ierr < 10) {
 					printf("         array b: index: %ld, expected: %e, observed: %e, relative error: %e\n",
-						j,bj,b[j],abs((bj-b[j])/bAvgErr));
+			j,bj,b[j],abs((bj-b[j])/bAvgErr));
 				}
 #endif
 			}
@@ -707,7 +673,7 @@ void checkSTREAMresults ()
 #ifdef VERBOSE
 				if (ierr < 10) {
 					printf("         array c: index: %ld, expected: %e, observed: %e, relative error: %e\n",
-						j,cj,c[j],abs((cj-c[j])/cAvgErr));
+			j,cj,c[j],abs((cj-c[j])/cAvgErr));
 				}
 #endif
 			}
@@ -730,34 +696,230 @@ void checkSTREAMresults ()
 void tuned_STREAM_Copy()
 {
 	ssize_t j;
-#pragma omp parallel for
-        for (j=0; j<STREAM_ARRAY_SIZE; j++)
-            c[j] = a[j];
+#ifdef COPY_ATK
+#if defined(EVICT_N_TIME) || defined(PRIME_N_PROBE)
+	prime();
+#endif
+#if defined(FLUSH_N_RELOAD) || defined(FLUSH_N_FLUSH)
+	flush();
+#endif
+#ifdef INVAL_N_TRANS
+	invalidate();
+#endif
+#ifdef EVICT_N_TIME
+	uint64_t start_time = generic_timer_get_time(&timer);
+#endif
+#endif
+	/*#pragma omp parallel for*/
+	for (j=0; j<STREAM_ARRAY_SIZE; j++)
+		c[j] = a[j];
+#ifdef COPY_ATK
+#ifdef PRIME_N_PROBE
+	probe();
+#endif
+#if defined (FLUSH_N_RELOAD) || defined(INVAL_N_TRANS)
+	reload();
+#endif
+#ifdef EVICT_N_TIME
+	uint64_t end_time = generic_timer_get_time(&timer);
+#endif
+#ifdef FLUSH_N_FLUSH
+	time_flush();
+#endif
+#endif
 }
 
 void tuned_STREAM_Scale(STREAM_TYPE scalar)
 {
 	ssize_t j;
-#pragma omp parallel for
+#ifdef SCALE_ATK
+#if defined(EVICT_N_TIME) || defined(PRIME_N_PROBE)
+	prime();
+#endif
+#if defined(FLUSH_N_RELOAD) || defined(FLUSH_N_FLUSH)
+	flush();
+#endif
+#ifdef INVAL_N_TRANS
+	invalidate();
+#endif
+#ifdef EVICT_N_TIME
+	uint64_t start_time = generic_timer_get_time(&timer);
+#endif
+#endif
+	/*#pragma omp parallel for*/
 	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    b[j] = scalar*c[j];
+		b[j] = scalar*c[j];
+#ifdef SCALE_ATK
+#ifdef PRIME_N_PROBE
+	probe();
+#endif
+#if defined (FLUSH_N_RELOAD) || defined(INVAL_N_TRANS)
+	reload();
+#endif
+#ifdef EVICT_N_TIME
+	uint64_t end_time = generic_timer_get_time(&timer);
+#endif
+#ifdef FLUSH_N_FLUSH
+	time_flush();
+#endif
+#endif
 }
 
 void tuned_STREAM_Add()
 {
 	ssize_t j;
-#pragma omp parallel for
+#ifdef ADD_ATK
+#if defined(EVICT_N_TIME) || defined(PRIME_N_PROBE)
+	prime();
+#endif
+#if defined(FLUSH_N_RELOAD) || defined(FLUSH_N_FLUSH)
+	flush();
+#endif
+#ifdef INVAL_N_TRANS
+	invalidate();
+#endif
+#ifdef EVICT_N_TIME
+	uint64_t start_time = generic_timer_get_time(&timer);
+#endif
+#endif
+	/*#pragma omp parallel for*/
 	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    c[j] = a[j]+b[j];
+		c[j] = a[j]+b[j];
+#ifdef ADD_ATK
+#ifdef PRIME_N_PROBE
+	probe();
+#endif
+#if defined (FLUSH_N_RELOAD) || defined(INVAL_N_TRANS)
+	reload();
+#endif
+#ifdef EVICT_N_TIME
+	uint64_t end_time = generic_timer_get_time(&timer);
+#endif
+#ifdef FLUSH_N_FLUSH
+	time_flush();
+#endif
+#endif
 }
 
 void tuned_STREAM_Triad(STREAM_TYPE scalar)
 {
 	ssize_t j;
-#pragma omp parallel for
+#ifdef TRIAD_ATK
+#if defined(EVICT_N_TIME) || defined(PRIME_N_PROBE)
+	prime();
+#endif
+#if defined(FLUSH_N_RELOAD) || defined(FLUSH_N_FLUSH)
+	flush();
+#endif
+#ifdef INVAL_N_TRANS
+	invalidate();
+#endif
+#ifdef EVICT_N_TIME
+	uint64_t start_time = generic_timer_get_time(&timer);
+#endif
+#endif
+	/*#pragma omp parallel for*/
 	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    a[j] = b[j]+scalar*c[j];
+		a[j] = b[j]+scalar*c[j];
+#ifdef TRIAD_ATK
+#ifdef PRIME_N_PROBE
+	probe();
+#endif
+#if defined (FLUSH_N_RELOAD) || defined(INVAL_N_TRANS)
+	reload();
+#endif
+#ifdef EVICT_N_TIME
+	uint64_t end_time = generic_timer_get_time(&timer);
+#endif
+#ifdef FLUSH_N_FLUSH
+	time_flush();
+#endif
+#endif
 }
 /* end of stubs for the "tuned" versions of the kernels */
 #endif
 
+#if defined(EVICT_N_TIME) || defined(PRIME_N_PROBE)
+void prime()
+{
+	ssize_t i;
+	// Prime Phase: Fill the cache
+	for (i = 0; i < STREAM_ARRAY_SIZE; i += DOUBLES_IN_LINE) {
+		attacker_array[i] = i; // Load data into the cache
+	}
+}
+#endif
+
+#ifdef PRIME_N_PROBE
+void probe()
+{
+	ssize_t i;
+	uint64_t start_time, end_time;
+	uint64_t elapsed_nsecs;
+
+	// Probe Phase: Measure access times
+	for (i = 0; i < STREAM_ARRAY_SIZE; i += DOUBLES_IN_LINE) {
+		start_time = generic_timer_get_time(&timer);
+		volatile char data = attacker_array[i];
+		end_time = generic_timer_get_time(&timer);
+		elapsed_nsecs = end_time - start_time;
+	}
+}
+#endif
+
+#if defined(FLUSH_N_FLUSH) || defined(FLUSH_N_RELOAD)
+static inline void clflush(void *addr) {
+	asm volatile ("DC CIVAC, %[ad]" : : [ad] "r" (addr));
+	asm volatile("DSB SY");
+}
+
+void flush()
+{
+	for (int j=0; j<STREAM_ARRAY_SIZE; j+=DOUBLES_IN_LINE)
+		clflush(&c[j]);
+}
+#endif
+
+#if defined (FLUSH_N_RELOAD) || defined(INVAL_N_TRANS)
+void reload()
+{
+	ssize_t i;
+	double data;
+	uint64_t start_time, end_time;
+	uint64_t elapsed_nsecs;
+
+	for (i = 0; i < STREAM_ARRAY_SIZE; i += DOUBLES_IN_LINE) {
+		start_time = generic_timer_get_time(&timer);
+		data = c[i];
+		end_time = generic_timer_get_time(&timer);
+		elapsed_nsecs = end_time - start_time;
+	}
+}
+#endif
+
+#ifdef FLUSH_N_FLUSH
+void time_flush()
+{
+	uint64_t start_time, end_time;
+	uint64_t elapsed_nsecs;
+
+	start_time = generic_timer_get_time(&timer);
+	for (int j=0; j<STREAM_ARRAY_SIZE; j+=DOUBLES_IN_LINE)
+		clflush(&c[j]);
+	end_time = generic_timer_get_time(&timer);
+	elapsed_nsecs = end_time - start_time;
+}
+#endif
+
+#ifdef INVAL_N_TRANS
+static inline void clinval(void *addr) {
+	asm volatile ("DC IVAC, %[ad]" : : [ad] "r" (addr));
+	asm volatile("DSB SY");
+}
+
+void invalidate()
+{
+	for (int j=0; j<STREAM_ARRAY_SIZE; j+=DOUBLES_IN_LINE)
+		clinval(&c[j]);
+}
+#endif

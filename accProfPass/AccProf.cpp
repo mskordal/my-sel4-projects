@@ -25,8 +25,6 @@ using namespace llvm;
 #define HLS_VIRT_ADDR 0x10000000 ///< virtual address for our test app
 #define DISABLE_EL1_EVENT_COUNT 0x80000000
 
-#define COUNTERS_NUM 6
-
 
 void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
 	Function *prolog_func, LLVMContext &ctx);
@@ -43,7 +41,6 @@ std::vector<Instruction *> get_call_instrs(std::vector<std::string> &func_names,
 	Function *func);
 std::vector<Instruction *> get_ret_instrs(Function *func);
 Function *create_prolog_func(int funcID, Module &M, LLVMContext &ctx);
-Function* create_epilog_func(Module &M, LLVMContext &ctx);
 void create_extern_func_declarations(Module &M, LLVMContext &ctx);
 int  get_event_id(std::string event_name);
 #ifdef DEBUG_PRINT
@@ -65,7 +62,7 @@ enum eventIndices
 	EVENT3,
 	EVENT4,
 	EVENT5,
-	TOTAL_EVENTS
+	MAX_EVENTS
 };
 
 enum decl_funcs
@@ -85,13 +82,14 @@ enum decl_funcs
 	TOTAL_DECL_FUNCS
 };
 
-int event_pmu_codes[TOTAL_EVENTS - 1];
+int event_pmu_codes[MAX_EVENTS - 1];
+int events_num; ///< The actual number of events profiling. Counted at runtime
 
 GlobalVariable *hls_global_var;
 
 /** 64bit cpu cycles, 64bit event 0-5 */
-GlobalVariable *event_global_vars[TOTAL_EVENTS]; ///< Globals: events0-5 & cpu
-AllocaInst *event_local_vars[TOTAL_EVENTS]; ///< Locals: events0-5 & cpu
+GlobalVariable *event_global_vars[MAX_EVENTS]; ///< Globals: events0-5 & cpu
+AllocaInst *event_local_vars[MAX_EVENTS]; ///< Locals: events0-5 & cpu
 
 std::string decl_func_names[TOTAL_DECL_FUNCS] =
 {
@@ -144,13 +142,13 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	if (event_name_ifname.getNumOccurrences() > 0)
 	{
 		event_name_ifstream = new std::ifstream(event_name_ifname);
-		int i = 0;
+		events_num = 0;
 		while (std::getline(*event_name_ifstream, line))
 		{
-			event_pmu_codes[i++] = get_event_id(line);
+			event_pmu_codes[events_num++] = get_event_id(line);
 		}
 		errs() << "List of events to be counted:";
-		for (i = 0; i < COUNTERS_NUM; i++)
+		for (int i = 0; i < events_num; i++)
 		{
 			errs() << "event 0: " << event_pmu_codes[i];
 		}
@@ -203,7 +201,7 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 	hls_global_var->setInitializer(PtrVal);
 
 	// Create the global variables for the cpu cycles and the 6 events
-	for (int i = 0; i < TOTAL_EVENTS; i++)
+	for (int i = 0; i < events_num + 1; i++)
 	{
 		event_global_vars[i] = new GlobalVariable(M, Type::getInt64Ty(ctx),
 			false, GlobalValue::ExternalLinkage, nullptr,
@@ -214,7 +212,6 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 			ConstantInt::get(ctx, APInt(64, 0)));
 	}
 	Function* prolog_func = create_prolog_func(0, M, ctx);
-	Function* epilog_func = create_epilog_func(M, ctx);
 
 	Function *main_func = M.getFunction("main");
 
@@ -232,7 +229,7 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 		mainBuilder.CreateCall(decl_funcs[SEL4BENCH_INIT]);
 
 		// For every counter
-		for (int i = 0; i < TOTAL_EVENTS - 1; ++i)
+		for (int i = 0; i < events_num; ++i)
 		{
 			// Set the corresponding event to count and disable kernel count
 			Value *event_args[2] =
@@ -252,20 +249,20 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 		Value *is_idle_bit_0_val;
 
 		// get function the function
-		Function *func = M.getFunction(func_names.at(i));
+		Function *profile_func = M.getFunction(func_names.at(i));
 
 		// function may not exist or may only be declared in this module. In
 		// that case we don't perform any instrumentation
-		if(!func) continue;
-		if(func->empty()) continue;
+		if(!profile_func) continue;
+		if(profile_func->empty()) continue;
 
-		BasicBlock *entry_bblk = &func->getEntryBlock();
+		BasicBlock *entry_bblk = &profile_func->getEntryBlock();
 
 		inject_local_allocs_rst_counters(entry_bblk, func_ids.at(i),
 			prolog_func, ctx);
 
 		std::vector<Instruction*> call_instrs = get_call_instrs(func_names,
-			func);
+			profile_func);
 
 		// For every call instructions split blocks. In the end bblk is a block
 		// that contains just the call instruction and nextBblk is the block
@@ -280,23 +277,49 @@ PreservedAnalyses AccProfMod::run(Module &M, ModuleAnalysisManager &AM)
 			inject_add_counters_to_locals(call_instr_bblk, ctx);
 			inject_add_globals_to_locals(after_call_instr_bblk, ctx);
 		}
-		std::vector<Instruction *> ret_instrs = get_ret_instrs(func);
+		std::vector<Instruction *> ret_instrs = get_ret_instrs(profile_func);
 		for (Instruction *ret_instr : ret_instrs)
 		{
-			Value *epilog_func_args[TOTAL_EVENTS] =
-			{
-				event_local_vars[CPU_CYCLES],
-				event_local_vars[EVENT0],
-				event_local_vars[EVENT1],
-				event_local_vars[EVENT2],
-				event_local_vars[EVENT3],
-				event_local_vars[EVENT4],
-				event_local_vars[EVENT5]
-			};
-			CallInst *epilog_func_call_instr = CallInst::Create(
-				epilog_func->getFunctionType(), epilog_func, epilog_func_args,
-				"accprof_epilog");
-			epilog_func_call_instr->insertBefore(ret_instr);
+			BasicBlock *pre_ret_bblk = ret_instr->getParent();
+			// if return is not the first block instruction do an extra split
+			if (&(pre_ret_bblk->front()) != ret_instr)
+				pre_ret_bblk = SplitBlock(pre_ret_bblk, ret_instr);
+
+			// This creates an empty block before the return block to avoid
+			// cases where loops from existing blocks will miss the new blocks.
+			// ret_bblk is the empty block now and new_ret_bblk contains return.
+			BasicBlock *ret_bblk = SplitBlock(pre_ret_bblk, ret_instr);
+
+			Value *is_idle_bit_0_val;
+			// allocate o local var in the empty block to read control register
+			IRBuilder<> pre_ret_bblk_builder(pre_ret_bblk,
+				pre_ret_bblk->begin());
+			AllocaInst* ctrl_sig_var = pre_ret_bblk_builder.CreateAlloca(
+				IntegerType::getInt32Ty(ctx));
+			BasicBlock *wr_metrics_to_globals_bblk =
+				create_wr_metrics_to_globals_bblk(profile_func, ctx);
+			BasicBlock *spinlock_idle_bit_bblk = create_spinlock_idle_bit_bblk(
+				ctrl_sig_var, profile_func, ctx, &is_idle_bit_0_val);
+			BasicBlock *wr_metrics_to_hls_bblk = create_wr_metrics_to_hls_bblk(
+				ctrl_sig_var, profile_func, ctx);
+
+			// Connect blocks. Connect the empty block to the first created
+			Instruction *pre_ret_bblk_term_instr = pre_ret_bblk->getTerminator();
+			BranchInst *br_instr = dyn_cast<BranchInst>(pre_ret_bblk_term_instr);
+			br_instr->setSuccessor(0, wr_metrics_to_globals_bblk);
+
+			IRBuilder<> wr_metrics_to_globals_bblk_builder(
+				wr_metrics_to_globals_bblk, wr_metrics_to_globals_bblk->end());
+			wr_metrics_to_globals_bblk_builder.CreateBr(spinlock_idle_bit_bblk);
+
+			IRBuilder<> spinlock_idle_bit_bblk_builder(spinlock_idle_bit_bblk,
+				spinlock_idle_bit_bblk->end());
+			spinlock_idle_bit_bblk_builder.CreateCondBr(is_idle_bit_0_val,
+				spinlock_idle_bit_bblk, wr_metrics_to_hls_bblk);
+
+			IRBuilder<> wr_metrics_to_hls_bblk_builder(
+				wr_metrics_to_hls_bblk, wr_metrics_to_hls_bblk->end());
+			wr_metrics_to_hls_bblk_builder.CreateBr(ret_bblk);
 		}
 		debug_errs(func_names.at(i) << " instrumentation done!!");
 	}
@@ -374,7 +397,7 @@ void inject_local_allocs_rst_counters(BasicBlock *bblk, int func_id,
 		*bblk->getModule());
 #endif
 	// Allocate local vars for events and call prolog function
-	for (int i = 0; i < TOTAL_EVENTS; ++i)
+	for (int i = 0; i < events_num + 1; ++i)
 	{
 		event_local_vars[i] = builder.CreateAlloca(
 			IntegerType::getInt64Ty(ctx));
@@ -630,7 +653,7 @@ BasicBlock *create_wr_metrics_to_hls_bblk(AllocaInst *ctrl_sig_var,
 	Value *eventVal32;
 	for (int currHalf = 0; currHalf < 4; currHalf += 2)
 	{
-		for (int currEvent = 0; currEvent < TOTAL_EVENTS * 4; currEvent += 4)
+		for (int currEvent = 0; currEvent < (events_num + 1) * 4; currEvent += 4)
 		{
 			// Create Load Inst to load current counted event val from global
 			LoadInst *wholeEventVal = builder.CreateAlignedLoad(
@@ -771,7 +794,7 @@ void inject_add_globals_to_locals(BasicBlock *bblk, LLVMContext &ctx)
 	debug_errs(__func__<< ": " << bblk->getParent()->getName().str()
 		<< ": Enter");
 
-	for (int i = 0; i < TOTAL_EVENTS; ++i)
+	for (int i = 0; i < events_num + 1; ++i)
 	{
 		// Create a load inst to read the value of the global event variable
 		LoadInst *globalEventVal = builder.CreateLoad(
@@ -830,7 +853,7 @@ void inject_add_counters_to_locals(BasicBlock *bblk, LLVMContext &ctx)
 		*bblk->getModule());
 #endif
 	debug_errs(__func__<<": "<<bblk->getParent()->getName().str()<<": Enter");
-	CallInst *countEventVals[TOTAL_EVENTS];
+	CallInst *countEventVals[events_num + 1];
 
 	// Put synchronisation barriers before collecting results
 	InlineAsm *dsb_asm = InlineAsm::get(FunctionType::get(Type::getVoidTy(ctx),
@@ -845,14 +868,14 @@ void inject_add_counters_to_locals(BasicBlock *bblk, LLVMContext &ctx)
 		decl_funcs[SEL4BENCH_GET_CYCLE_COUNT]);
 
 	// Create call inst to sel4bench_get_counter to get the other event counts
-	for (int i = 1; i < TOTAL_EVENTS; ++i)
+	for (int i = 0; i < events_num; ++i)
 	{
-		Value *s4bgcArg[1] = {ConstantInt::get(ctx, APInt(64, i - 1))};
-		countEventVals[i] = builder.CreateCall(
+		Value *s4bgcArg[1] = {ConstantInt::get(ctx, APInt(64, i))};
+		countEventVals[i + 1] = builder.CreateCall(
 			decl_funcs[SEL4BENCH_GET_COUNTER], s4bgcArg);
 	}
 	// For each count, load local, add with recent counts, store back to local
-	for (int i = 0; i < TOTAL_EVENTS; ++i)
+	for (int i = 0; i < events_num + 1; ++i)
 	{
 		LoadInst *localEventVal = builder.CreateLoad(
 			event_local_vars[i]->getAllocatedType(), event_local_vars[i]);
@@ -895,38 +918,27 @@ BasicBlock *create_wr_metrics_to_globals_bblk(Function *func, LLVMContext &ctx)
 	builder.CreateCall(dsb_asm);
 	builder.CreateCall(isb_asm);
 
-	CallInst *countEventVals[TOTAL_EVENTS];
+	CallInst *countEventVals[events_num + 1];
 	// Create call inst to sel4bench_get_cycle_count to get cpu cycles count
 	countEventVals[CPU_CYCLES] = builder.CreateCall(
 		decl_funcs[SEL4BENCH_GET_CYCLE_COUNT]);
 
 	// Create call inst to sel4bench_get_counter to get the other event counts
-	for (int i = 1; i < TOTAL_EVENTS; ++i)
+	for (int i = 0; i < events_num; ++i)
 	{
-		Value *s4bgcArg[1] = {ConstantInt::get(ctx, APInt(64, i - 1))};
-		countEventVals[i] = builder.CreateCall(
+		Value *s4bgcArg[1] = {ConstantInt::get(ctx, APInt(64, i))};
+		countEventVals[i + 1] = builder.CreateCall(
 			decl_funcs[SEL4BENCH_GET_COUNTER], s4bgcArg);
 	}
 	// For each count, load local, add with recent counts, store back to local
 	Function::arg_iterator  arg = func->arg_begin();
-	for (int i = 0; i < TOTAL_EVENTS; ++i)
+	for (int i = 0; i < events_num + 1; ++i)
 	{
-		Value* argVal = &*arg;
-
 		LoadInst *localEventVal = builder.CreateLoad(
-			argVal->getType(), argVal);
-#ifdef DEBUG_PRINT
-			insertPrint(builder, "\tadding arg: ", argVal, 
-				*func->getParent());
-			insertPrint(builder, "\twith count event: ", countEventVals[i], 
-				*func->getParent());
-#endif
-		// LoadInst *localEventVal = builder.CreateLoad(
-		// 	event_local_vars[i]->getAllocatedType(), event_local_vars[i]);
+			event_local_vars[i]->getAllocatedType(), event_local_vars[i]);
 		Value *totalEventVal = builder.CreateAdd(localEventVal,
 			countEventVals[i]);
 		builder.CreateStore(totalEventVal, event_global_vars[i]);
-		++arg;
 	}
 #ifdef DEBUG_PRINT
 	insertPrint(builder,  std::string(__func__) + " <<" + func->getName().str()
@@ -1068,69 +1080,6 @@ Function* create_prolog_func(int funcID, Module &M, LLVMContext &ctx)
 	return prolog_func;
 }
 
-/**
- * Defines a function to which call instructions will be injected by the pass,
- * before each return instruction of a function that will be profiled.
- * @param M The current Module Object
- * @param ctx The context of current Module
- * @return The object to the function created
- */
-Function* create_epilog_func(Module &M, LLVMContext &ctx)
-{
-	debug_errs(__func__<< ": Enter");
-	Value *is_idle_bit_0_val;
-
-	std::vector<Type*> func_param_typ
-	{
-		Type::getInt64Ty(ctx), // cpu cycles
-		Type::getInt64Ty(ctx), // event 0
-		Type::getInt64Ty(ctx), // event 1
-		Type::getInt64Ty(ctx), // event 2
-		Type::getInt64Ty(ctx), // event 3
-		Type::getInt64Ty(ctx), // event 4
-		Type::getInt64Ty(ctx)  // event 5
-	};
-	Type* func_ret_typ = Type::getVoidTy(ctx);
-	FunctionType* ft = FunctionType::get(func_ret_typ, func_param_typ, false);
-	Function* epilog_func = Function::Create(ft, Function::ExternalLinkage,
-		"accprof_epilog", &M);
-	std::string absolut_filename = M.getName().str();
-	std::string src_filename = std::filesystem::path(absolut_filename).
-		filename().replace_extension("").string();
-	
-	// In case of profiling multiple files, we want the epilogue function to
-	// only be defined in the main file and be declared in the rest.
-	if(src_filename.find("main") != std::string::npos)
-	//if(src_filename == "main")
-	{
-		// Create a dummy block with a return to add all other blocks before it
-		BasicBlock *entry_bblk = BasicBlock::Create(ctx, "", epilog_func);
-		IRBuilder<> entry_bblk_builder(entry_bblk, entry_bblk->begin());
-		AllocaInst* ctrl_sig_var = entry_bblk_builder.CreateAlloca(
-				IntegerType::getInt32Ty(ctx));
-		BasicBlock *wr_metrics_to_globals_bblk =
-			create_wr_metrics_to_globals_bblk(epilog_func, ctx);
-		BasicBlock *spinlock_idle_bit_bblk = create_spinlock_idle_bit_bblk(
-			ctrl_sig_var, epilog_func, ctx, &is_idle_bit_0_val);
-		BasicBlock *wr_metrics_to_hls_bblk = create_wr_metrics_to_hls_bblk(
-			ctrl_sig_var, epilog_func, ctx);
-
-		// Connect blocks with control transfer instructions
-		entry_bblk_builder.CreateBr(wr_metrics_to_globals_bblk);
-		IRBuilder<> wr_metrics_to_globals_bblk_builder(
-			wr_metrics_to_globals_bblk, wr_metrics_to_globals_bblk->end());
-		wr_metrics_to_globals_bblk_builder.CreateBr(spinlock_idle_bit_bblk);
-		IRBuilder<> spinlock_idle_bit_bblk_builder(spinlock_idle_bit_bblk,
-			spinlock_idle_bit_bblk->end());
-		spinlock_idle_bit_bblk_builder.CreateCondBr(is_idle_bit_0_val,
-			spinlock_idle_bit_bblk, wr_metrics_to_hls_bblk);
-		IRBuilder<> wr_metrics_to_hls_bblk_builder(wr_metrics_to_hls_bblk,
-			wr_metrics_to_hls_bblk->end());
-		wr_metrics_to_hls_bblk_builder.CreateRetVoid();
-		debug_errs(__func__<< ": Exit");
-	}
-	return epilog_func;
-}
 
 /**
  * Iterates over the SeL4 function names in @c decl_func_names and for every

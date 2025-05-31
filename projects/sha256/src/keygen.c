@@ -105,11 +105,13 @@ void store_counter_to_key(uint64_t counter, attkey_t *key)
 void create_attkey(attkey_t *attkey, uint64_t *counters, int *event_shifts)
 {
 	uint64_t stable_counter;
-	int event;
+	/*int event;*/
+	int event = 0;
 
 	/*printf("Stable bits gathered:\n");*/
 	memset(attkey, 0, sizeof(attkey_t));
-	for(event = 0; event < TOTAL_EVENTS; event++)
+	/*for(event = 0; event < TOTAL_EVENTS; event++)*/
+	while(counters[event++] != 0)
 	{
 		stable_counter = counters[event] >> event_shifts[event];
 		/*printf("%d:%lx - ", event, stable_counter);*/

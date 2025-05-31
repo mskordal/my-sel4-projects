@@ -28,5 +28,5 @@ export LLVM_SYMBOLIZER_PATH=$LLVM_DIR/bin/llvm-symbolizer
 rm -rf ./*
 ../init-build.sh -DPLATFORM=zcu102 -DTRIPLE=aarch64-linux-gnu \
 	-DLLVMPass=$1 -DFunctionsFile=$2 -DEventsFile=$3 -DEventShiftsFile=$4 \
-	-DKeysFile=$5 -DCompileLarge=$6
+	-DCompileLarge=$5
 ninja

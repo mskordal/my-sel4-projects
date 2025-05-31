@@ -77,3 +77,8 @@ BW_btbl_bitcount 6
 AR_btbl_bitcount 7
 bit_shifter 8
 
+## qsort
+qsort 2
+
+## dijkstra
+dijkstra
